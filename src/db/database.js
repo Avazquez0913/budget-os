@@ -1,8 +1,8 @@
 // src/db/database.js
 import * as SQLite from 'expo-sqlite';
-import { EXPENSES } from '../constants/expenses';
+import { EXPENSES, TOTAL_FIXED, DEFAULT_SETTINGS } from '../constants/expenses';
 
-const db = SQLite.openDatabaseSync('budgetos4.db');
+const db = SQLite.openDatabaseSync('budgetos8.db');
 
 export function initDatabase() {
   db.execSync(`
@@ -95,7 +95,7 @@ export function initDatabase() {
     const now = new Date().toISOString();
     db.runSync(
       'INSERT INTO buckets (name, goal_amount, current_balance, color, created_at) VALUES (?, ?, ?, ?, ?)',
-      ['Emergency Fund', 2786.15, 0, '#ff9f43', now]
+      ['Emergency Fund', parseFloat((TOTAL_FIXED * 4).toFixed(2)), 0, '#ff9f43', now]
     );
     db.runSync(
       'INSERT INTO buckets (name, goal_amount, current_balance, color, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -248,4 +248,16 @@ export function getHistory() {
     JOIN allocations a ON a.income_entry_id = i.id
     ORDER BY i.shift_date DESC
   `);
+}
+
+export function updateBucket(id, name, goalAmount) {
+  db.runSync(
+    'UPDATE buckets SET name = ?, goal_amount = ? WHERE id = ?',
+    [name, goalAmount, id]
+  );
+}
+
+export function deleteBucket(id) {
+  db.runSync('DELETE FROM bucket_contributions WHERE bucket_id = ?', [id]);
+  db.runSync('DELETE FROM buckets WHERE id = ?', [id]);
 }
