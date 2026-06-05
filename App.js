@@ -279,6 +279,10 @@ export default function App() {
             </>
           )}
 
+          {result.partial.length > 0 && console.log('PARTIAL BILLS:', result.partial.map(p => ({
+            name: p.name, alreadyFunded: p.alreadyFunded, amountFunded: p.amountFunded,
+            amount: p.amount, pctFunded: p.pctFunded
+          })))}
           {result.partial.length > 0 && (
             <>
               <Text style={[s.sectionLabel, { color: colors.emergency, marginTop: 16 }]}>PARTIAL</Text>
