@@ -3,7 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import { EXPENSES, TOTAL_FIXED } from '../constants/expenses';
 
 // Upgraded to database file v10 for a fresh, error-free sandbox boot!
-const db = SQLite.openDatabaseSync('budgetos15.db');
+const db = SQLite.openDatabaseSync('budgetos16.db');
 
 export function initDatabase() {
   // 1. Settings Table
