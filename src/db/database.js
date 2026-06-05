@@ -195,6 +195,15 @@ export function initDatabase() {
       ['Unexpected Expenses', 500, 0, '#7b61ff', now]
     );
   }
+
+  const savingsBucketCheck = db.getFirstSync("SELECT COUNT(*) as count FROM buckets WHERE name = 'Savings'");
+  if (savingsBucketCheck.count === 0) {
+    const now = new Date().toISOString();
+    db.runSync(
+      'INSERT INTO buckets (name, goal_amount, current_balance, color, created_at) VALUES (?, ?, ?, ?, ?)',
+      ['Savings', null, 0, '#00d4a8', now]
+    );
+  }
 }
 
 export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDate, allocationResult) {
@@ -241,9 +250,9 @@ export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDat
     );
   }
 
-  // 4. Mirror Savings Allocation Natively into Unexpected Expenses Bucket
+  // 4. Mirror Savings Allocation Natively into Savings Bucket
   if (allocationResult.savings > 0) {
-    const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses'");
+    const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Savings'");
     if (savingsBucket) {
       db.runSync(
         'INSERT INTO bucket_contributions (bucket_id, amount, note, created_at) VALUES (?, ?, ?, ?)', 
@@ -599,7 +608,7 @@ export function editShiftAllocation(incomeEntryId, newAmount) {
   const emergencyDiff = newEmergency - alloc.emergency;
 
   // 6. Update savings bucket
-  const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses' LIMIT 1");
+  const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Savings' LIMIT 1");
   if (savingsBucket) {
     db.runSync(
       'UPDATE buckets SET current_balance = MAX(0, current_balance + ?) WHERE id = ?',
@@ -643,7 +652,7 @@ export function deleteShiftAllocation(incomeEntryId) {
   // 2–4. Reverse bucket balances if allocation exists
   if (alloc) {
     if (alloc.savings > 0) {
-      const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses' LIMIT 1");
+      const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Savings' LIMIT 1");
       if (savingsBucket) {
         db.runSync(
           'UPDATE buckets SET current_balance = MAX(0, current_balance - ?) WHERE id = ?',
