@@ -511,6 +511,20 @@ export function editDebtPayment(paymentId, newAmount) {
   db.runSync('UPDATE debt_payments SET amount = ? WHERE id = ?', [newAmount, paymentId]);
 }
 
+export function editBucketBalance(bucketId, newBalance) {
+  db.runSync(
+    'UPDATE buckets SET current_balance = MAX(0, ?) WHERE id = ?',
+    [newBalance, bucketId]
+  );
+}
+
+export function editDebtBalance(debtId, newBalance) {
+  db.runSync(
+    'UPDATE user_debts SET balance = MAX(0, ?) WHERE id = ?',
+    [newBalance, debtId]
+  );
+}
+
 export function editBucketContribution(contributionId, bucketId, newAmount) {
   const old = db.getFirstSync('SELECT amount FROM bucket_contributions WHERE id = ?', [contributionId]);
   if (!old) return;
