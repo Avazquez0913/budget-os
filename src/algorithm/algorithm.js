@@ -68,48 +68,51 @@ export function allocate(incomeAmount, incomeType = 'tips', settings = null, mon
   const partial  = [];
   const unfunded = [];
 
-  for (const expense of sorted) {
-    if (expense.stillNeed === 0) continue;
+// src/algorithm/algorithm.js (Replace loop interior)
 
-    // how much should this shift contribute toward this bill?
-    // use daily rate as the target contribution
-    // but never more than what's still needed
-    const targetContribution = Math.min(
-      parseFloat(expense.dailyRate.toFixed(2)),
-      expense.stillNeed
-    );
+for (const expense of sorted) {
+  if (expense.stillNeed === 0) continue;
 
-    if (pool >= expense.stillNeed) {
-      // can fully fund this bill this shift
+  const targetContribution = Math.min(
+    parseFloat(expense.dailyRate.toFixed(2)),
+    expense.stillNeed
+  );
+
+  // Condition 1: We have enough to completely eliminate this bill right now
+  if (pool >= expense.stillNeed) {
+    funded.push({
+      ...expense,
+      status:       'funded',
+      amountFunded: expense.stillNeed,
+    });
+    pool = parseFloat((pool - expense.stillNeed).toFixed(2));
+  } 
+  // Condition 2: We can't fund it completely, but we can at least meet or exceed the daily target
+  else if (pool > 0) {
+    // Maximize your payout! Take as much as the pool can handle up to the full remaining need
+    const optimalContribution = Math.max(targetContribution, Math.min(pool, expense.stillNeed));
+    
+    if (optimalContribution === expense.stillNeed) {
       funded.push({
         ...expense,
-        status:       'funded',
-        amountFunded: expense.stillNeed,
+        status: 'funded',
+        amountFunded: expense.stillNeed
       });
       pool = parseFloat((pool - expense.stillNeed).toFixed(2));
-    } else if (pool >= targetContribution && pool > 0) {
-      // can meet today's daily contribution
-      funded.push({
-        ...expense,
-        status:       'funded',
-        amountFunded: parseFloat(targetContribution.toFixed(2)),
-      });
-      pool = parseFloat((pool - targetContribution).toFixed(2));
-    } else if (pool > 0) {
-      // can only partially fund today's contribution
+    } else {
       partial.push({
         ...expense,
         status:       'partial',
-        amountFunded: parseFloat(pool.toFixed(2)),
-        amountNeeded: parseFloat((expense.stillNeed - pool).toFixed(2)),
-        pctFunded:    parseFloat(((pool / expense.stillNeed) * 100).toFixed(1)),
+        amountFunded: parseFloat(optimalContribution.toFixed(2)),
+        amountNeeded: parseFloat((expense.stillNeed - optimalContribution).toFixed(2)),
+        pctFunded:    parseFloat((((expense.alreadyFunded + optimalContribution) / expense.amount) * 100).toFixed(1)),
       });
-      pool = 0;
-    } else {
-      unfunded.push({ ...expense, status: 'unfunded', amountFunded: 0 });
+      pool = parseFloat((pool - optimalContribution).toFixed(2));
     }
+  } else {
+    unfunded.push({ ...expense, status: 'unfunded', amountFunded: 0 });
   }
-
+}
   // if pool has surplus after daily contributions, accelerate most urgent bill
   if (pool > 0 && sorted.length > 0) {
     const mostUrgent = sorted.find(e =>
@@ -278,16 +281,135 @@ export function getInsights(historyEntries) {
   };
 }
 
-export function getDebtCountdown() {
-  const target   = new Date('2027-02-01');
-  const now      = new Date();
-  const msLeft   = target - now;
-  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-  const months   = Math.ceil(daysLeft / 30);
+// ── DEBT TRACKER ──────────────────────────────────────
+export function getDebtSummary() {
+  const now = new Date();
+
+  // ── helper: months between two dates ────────────────
+  function monthsUntil(targetDate) {
+    const diff = targetDate - now;
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24 * 30)));
+  }
+
+  function daysUntil(targetDate) {
+    return Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24)));
+  }
+
+  // ── truck dynamic balance ────────────────────────────
+  // Started: May 2026, $41,951.58, 4.99% APR, $676.83/mo
+  const truckStart     = new Date('2026-05-01');
+  const truckAPR       = 0.0499;
+  const truckMonthRate = truckAPR / 12;
+  const truckPayment   = 676.83;
+  let   truckBalance   = 41951.58;
+  const monthsElapsed  = Math.floor((now - truckStart) / (1000 * 60 * 60 * 24 * 30));
+  for (let i = 0; i < monthsElapsed; i++) {
+    const interest = truckBalance * truckMonthRate;
+    truckBalance = Math.max(0, truckBalance - (truckPayment - interest));
+  }
+  const truckMonthsLeft = Math.ceil(truckBalance / truckPayment);
+
+  // ── 0% promos ────────────────────────────────────────
+  const citiExpiry     = new Date('2027-02-01');
+  const discoverExpiry = new Date('2027-04-04');
+
+  // ── student loans ────────────────────────────────────
+  const studentDeferEnd = new Date('2026-11-01');
+  const daysToRepayment = daysUntil(studentDeferEnd);
+
   return {
-    daysLeft,
-    months,
-    freedPerMonth: 280.00,
-    card: 'CITI Card',
+    debts: [
+      {
+        name:        'CITI Card',
+        balance:     2520.00,
+        apr:         0,
+        type:        'promo',
+        promoExpiry: citiExpiry,
+        monthsLeft:  monthsUntil(citiExpiry),
+        daysLeft:    daysUntil(citiExpiry),
+        monthlyMin:  280.00,
+        freedWhenDone: 280.00,
+        urgency:     'high',
+        note:        '0% promo expires Feb 2027 — pay off before then',
+      },
+      {
+        name:        'Discover IT',
+        balance:     5250.00,
+        apr:         0,
+        type:        'promo',
+        promoExpiry: discoverExpiry,
+        monthsLeft:  monthsUntil(discoverExpiry),
+        daysLeft:    daysUntil(discoverExpiry),
+        monthlyMin:  0,
+        freedWhenDone: 0,
+        urgency:     'high',
+        note:        '0% promo expires Apr 2027 — build lump sum now',
+      },
+      {
+        name:        'Student Loan 1-02',
+        balance:     5500.00,
+        apr:         6.53,
+        type:        'student',
+        deferred:    true,
+        deferEndDate: studentDeferEnd,
+        daysToRepayment,
+        monthlyMin:  0,
+        urgency:     'medium',
+        note:        `Highest rate — attack first after Nov 2026`,
+      },
+      {
+        name:        'Student Loan 1-03',
+        balance:     5500.00,
+        apr:         6.39,
+        type:        'student',
+        deferred:    true,
+        deferEndDate: studentDeferEnd,
+        daysToRepayment,
+        monthlyMin:  0,
+        urgency:     'medium',
+        note:        'Attack second after 1-02 is cleared',
+      },
+      {
+        name:        'Student Loan 1-01',
+        balance:     4500.00,
+        apr:         5.50,
+        type:        'student',
+        deferred:    true,
+        deferEndDate: studentDeferEnd,
+        daysToRepayment,
+        monthlyMin:  0,
+        urgency:     'low',
+        note:        'Lowest rate — attack last',
+      },
+      {
+        name:         'Truck Loan',
+        balance:      parseFloat(truckBalance.toFixed(2)),
+        apr:          4.99,
+        type:         'installment',
+        deferred:     false,
+        monthsLeft:   truckMonthsLeft,
+        monthlyMin:   676.83,
+        freedWhenDone: 676.83,
+        urgency:      'low',
+        note:         'Lowest rate — pay minimum only',
+      },
+    ],
+    totalDebt: parseFloat(
+      (2520 + 5250 + 5500 + 5500 + 4500 + truckBalance).toFixed(2)
+    ),
+    nextUrgent: 'CITI Card',
+    studentDeferDaysLeft: daysToRepayment,
+  };
+}
+
+// keep old function for backward compatibility
+export function getDebtCountdown() {
+  const summary = getDebtSummary();
+  const citi = summary.debts[0];
+  return {
+    daysLeft:      citi.daysLeft,
+    months:        citi.monthsLeft,
+    freedPerMonth: citi.freedWhenDone,
+    card:          citi.name,
   };
 }

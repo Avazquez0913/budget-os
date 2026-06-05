@@ -11,7 +11,7 @@ import {
   getMonthlyBillProgress, updateBucket, deleteBucket
 } from './src/db/database';
 import {
-  allocate, getMonthlySummary, getInsights, getDebtCountdown
+  allocate, getMonthlySummary, getInsights, getDebtSummary
 } from './src/algorithm/algorithm';
 import { EXPENSES, TOTAL_FIXED } from './src/constants/expenses';
 import { colors } from './src/constants/theme';
@@ -366,7 +366,7 @@ export default function App() {
       {/* ── HOME TAB ── */}
       {tab === 'Home' && (
         <ScrollView contentContainerStyle={s.content}>
-          <Text style={s.appName}>BudgetOS</Text>
+          <Text style={s.appName}>FunDue</Text>
 
           {monthly && (
             <View style={s.monthCard}>
@@ -555,28 +555,106 @@ export default function App() {
                 </View>
               ))}
 
+              {/* ── DEBT TRACKER ── */}
               {(() => {
-                const cd = getDebtCountdown();
-                const monthsComplete = 18 - cd.months;
+                const debt = getDebtSummary();
                 return (
-                  <View style={[s.monthCard, { borderColor: colors.savings + '44', marginTop: 8 }]}>
-                    <Text style={s.monthLabel}>CITI CARD PAYOFF COUNTDOWN</Text>
-                    <Text style={[s.monthIncome, { color: colors.savings }]}>{cd.months} months left</Text>
-                    <View style={s.barTrack}>
-                      <View style={[s.barFill, {
-                        width: `${(monthsComplete / 18) * 100}%`,
-                        backgroundColor: colors.savings,
-                      }]} />
-                    </View>
-                    <Text style={s.muted}>{cd.daysLeft} days · $280/mo freed when done</Text>
-                    <Text style={[s.projText, { color: colors.savings }]}>
-                      {Math.round((monthsComplete / 18) * 100)}% complete
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={s.sectionLabel}>DEBT TRACKER</Text>
+                    <Text style={[s.muted, { marginBottom: 12 }]}>
+                      Total debt: ${debt.totalDebt.toLocaleString()}
                     </Text>
+
+                    {debt.debts.map((d, i) => (
+                      <View key={i} style={[s.monthCard, {
+                        borderLeftWidth: 3,
+                        borderLeftColor:
+                          d.urgency === 'high' ? colors.unfunded :
+                          d.urgency === 'medium' ? colors.emergency :
+                          colors.textMuted,
+                        marginBottom: 10,
+                      }]}>
+                        <View style={{ flexDirection: 'row',
+                          justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={s.billName}>{d.name}</Text>
+                          <Text style={[s.billAmt, {
+                            color: d.urgency === 'high' ? colors.unfunded :
+                                   d.urgency === 'medium' ? colors.emergency :
+                                   colors.textMuted
+                          }]}>
+                            ${d.balance.toLocaleString()}
+                          </Text>
+                        </View>
+
+                        {d.type === 'promo' && (
+                          <>
+                            <View style={s.barTrack}>
+                              <View style={[s.barFill, {
+                                width: `${Math.min(
+                                  ((d.name === 'CITI Card' ? 9 : 10) - d.monthsLeft) /
+                                  (d.name === 'CITI Card' ? 9 : 10) * 100, 100
+                                )}%`,
+                                backgroundColor: colors.savings,
+                              }]} />
+                            </View>
+                            <Text style={s.billSub}>
+                              {d.monthsLeft} months left · 0% expires{' '}
+                              {d.promoExpiry.toLocaleDateString('en-US',
+                                { month: 'short', year: 'numeric' })}
+                            </Text>
+                            <Text style={[s.billSub, { color: colors.unfunded, marginTop: 2 }]}>
+                              Need ${Math.ceil(d.balance / Math.max(d.monthsLeft, 1)).toLocaleString()}/mo to pay off in time
+                            </Text>
+                          </>
+                        )}
+
+                        {d.type === 'student' && (
+                          <>
+                            <Text style={[s.billSub, { color: colors.emergency }]}>
+                              {d.apr}% APR · Deferred
+                            </Text>
+                            <Text style={s.billSub}>
+                              Payments start in {d.daysToRepayment} days (Nov 2026)
+                            </Text>
+                          </>
+                        )}
+
+                        {d.type === 'installment' && (
+                          <>
+                            <View style={s.barTrack}>
+                              <View style={[s.barFill, {
+                                width: `${Math.min(
+                                  ((41951.58 - d.balance) / 41951.58) * 100, 100
+                                )}%`,
+                                backgroundColor: colors.textMuted,
+                              }]} />
+                            </View>
+                            <Text style={s.billSub}>
+                              {d.apr}% APR · ${d.balance.toLocaleString()} remaining · ~{d.monthsLeft} months left
+                            </Text>
+                          </>
+                        )}
+
+                        <Text style={[s.billSub, { marginTop: 4, fontStyle: 'italic' }]}>
+                          {d.note}
+                        </Text>
+                      </View>
+                    ))}
+
+                    {debt.studentDeferDaysLeft < 180 && (
+                      <View style={[s.explanationCard, {
+                        borderColor: colors.emergency + '44', marginTop: 4 }]}>
+                        <Text style={[s.explanationText, { color: colors.emergency }]}>
+                          ⚠ Student loans come out of deferment in{' '}
+                          {debt.studentDeferDaysLeft} days. Start budgeting for payments now.
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 );
               })()}
 
-              <Text style={s.sectionLabel}>RECENT SHIFTS</Text>
+              <Text style={[s.sectionLabel, { marginTop: 16 }]}>RECENT SHIFTS</Text>
               {history.slice(0, 10).map(h => (
                 <View key={h.id} style={s.historyCard}>
                   <View style={s.historyTop}>

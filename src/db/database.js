@@ -1,10 +1,12 @@
 // src/db/database.js
 import * as SQLite from 'expo-sqlite';
-import { EXPENSES, TOTAL_FIXED, DEFAULT_SETTINGS } from '../constants/expenses';
+import { EXPENSES, TOTAL_FIXED } from '../constants/expenses';
 
-const db = SQLite.openDatabaseSync('budgetos8.db');
+// Upgraded to database file v10 for a fresh, error-free sandbox boot!
+const db = SQLite.openDatabaseSync('budgetos15.db');
 
 export function initDatabase() {
+  // 1. Settings Table
   db.execSync(`
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY,
@@ -13,6 +15,10 @@ export function initDatabase() {
       personal_pct REAL NOT NULL DEFAULT 0.20,
       bills_pct REAL NOT NULL DEFAULT 0.60
     );
+  `);
+
+  // 2. Expenses Table
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS expenses (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -22,6 +28,10 @@ export function initDatabase() {
       due_day INTEGER NOT NULL DEFAULT 1,
       is_active INTEGER NOT NULL DEFAULT 1
     );
+  `);
+
+  // 3. Income Entries Table
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS income_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       amount REAL NOT NULL,
@@ -30,18 +40,25 @@ export function initDatabase() {
       shift_date TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+  `);
+
+  // 4. Allocations Table 
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS allocations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      income_entry_id INTEGER NOT NULL,
+      income_entry_id INTEGER NOT NULL REFERENCES income_entries(id),
       personal REAL NOT NULL DEFAULT 0,
       savings REAL NOT NULL,
       emergency REAL NOT NULL,
       bills_pool REAL NOT NULL DEFAULT 0,
       discretionary REAL NOT NULL,
       total_bills_covered REAL NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (income_entry_id) REFERENCES income_entries(id)
+      created_at TEXT NOT NULL
     );
+  `);
+
+  // 5. Buckets Table
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS buckets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -51,27 +68,33 @@ export function initDatabase() {
       color TEXT NOT NULL DEFAULT '#00d4a8',
       created_at TEXT NOT NULL
     );
+  `);
+
+  // 6. Bucket Contributions Table 
+  db.execSync(`
     CREATE TABLE IF NOT EXISTS bucket_contributions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      bucket_id INTEGER NOT NULL,
+      bucket_id INTEGER NOT NULL REFERENCES buckets(id),
       amount REAL NOT NULL,
       note TEXT,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (bucket_id) REFERENCES buckets(id)
-    );
-    CREATE TABLE IF NOT EXISTS bill_contributions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      expense_id INTEGER NOT NULL,
-      income_entry_id INTEGER NOT NULL,
-      amount_funded REAL NOT NULL,
-      status TEXT NOT NULL,
-      shift_date TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (expense_id) REFERENCES expenses(id),
-      FOREIGN KEY (income_entry_id) REFERENCES income_entries(id)
+      created_at TEXT NOT NULL
     );
   `);
 
+  // 7. Bill Contributions Table 
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS bill_contributions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id),
+      income_entry_id INTEGER NOT NULL REFERENCES income_entries(id),
+      amount_funded REAL NOT NULL,
+      status TEXT NOT NULL,
+      shift_date TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // --- SEEDING LOGIC ---
   const existingSettings = db.getFirstSync('SELECT COUNT(*) as count FROM settings');
   if (existingSettings.count === 0) {
     db.runSync(
@@ -106,13 +129,15 @@ export function initDatabase() {
 
 export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDate, allocationResult) {
   const now = new Date().toISOString();
+  
+  // 1. Log Income Entry
   const incomeEntry = db.runSync(
     'INSERT INTO income_entries (amount, income_type, note, shift_date, created_at) VALUES (?, ?, ?, ?, ?)',
     [incomeAmount, incomeType, note, shiftDate, now]
   );
-
   const entryId = incomeEntry.lastInsertRowId;
 
+  // 2. Log Master Allocation Allocation
   db.runSync(
     `INSERT INTO allocations 
       (income_entry_id, personal, savings, emergency, bills_pool, 
@@ -130,6 +155,7 @@ export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDat
     ]
   );
 
+  // 3. Log Target Bill Progress
   const allBills = [
     ...allocationResult.funded,
     ...allocationResult.partial,
@@ -143,6 +169,36 @@ export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDat
        VALUES (?, ?, ?, ?, ?, ?)`,
       [bill.id, entryId, bill.amountFunded || 0, bill.status, shiftDate, now]
     );
+  }
+
+  // 4. Mirror Savings Allocation Natively into Unexpected Expenses Bucket
+  if (allocationResult.savings > 0) {
+    const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses'");
+    if (savingsBucket) {
+      db.runSync(
+        'INSERT INTO bucket_contributions (bucket_id, amount, note, created_at) VALUES (?, ?, ?, ?)', 
+        [savingsBucket.id, allocationResult.savings, `Shift allocation (${shiftDate})`, now]
+      );
+      db.runSync(
+        'UPDATE buckets SET current_balance = current_balance + ? WHERE id = ?', 
+        [allocationResult.savings, savingsBucket.id]
+      );
+    }
+  }
+
+  // 5. Mirror Emergency Allocation Natively into Emergency Fund Bucket
+  if (allocationResult.emergency > 0) {
+    const emergencyBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Emergency Fund'");
+    if (emergencyBucket) {
+      db.runSync(
+        'INSERT INTO bucket_contributions (bucket_id, amount, note, created_at) VALUES (?, ?, ?, ?)', 
+        [emergencyBucket.id, allocationResult.emergency, `Shift allocation (${shiftDate})`, now]
+      );
+      db.runSync(
+        'UPDATE buckets SET current_balance = current_balance + ? WHERE id = ?', 
+        [allocationResult.emergency, emergencyBucket.id]
+      );
+    }
   }
 
   return entryId;
@@ -200,8 +256,8 @@ export function getMonthlyTotals() {
       COALESCE(SUM(a.total_bills_covered), 0) as total_bills_covered
     FROM income_entries i
     JOIN allocations a ON a.income_entry_id = i.id
-    WHERE i.created_at LIKE '${prefix}%'
-  `);
+    WHERE i.created_at LIKE ? || '%'
+  `, [prefix]);
 }
 
 export function getMonthlyBillProgress() {
@@ -223,10 +279,10 @@ export function getMonthlyBillProgress() {
     FROM expenses e
     LEFT JOIN bill_contributions bc 
       ON bc.expense_id = e.id 
-      AND bc.shift_date LIKE '${prefix}%'
+      AND bc.shift_date LIKE ? || '%'
     GROUP BY e.id
     ORDER BY e.priority ASC, e.due_day ASC
-  `);
+  `, [prefix]);
 }
 
 export function getHistory() {
