@@ -3,7 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import { EXPENSES, TOTAL_FIXED } from '../constants/expenses';
 
 // Upgraded to database file v10 for a fresh, error-free sandbox boot!
-const db = SQLite.openDatabaseSync('budgetos16.db');
+const db = SQLite.openDatabaseSync('budgetos18.db');
 
 export function initDatabase() {
   // 1. Settings Table
@@ -85,8 +85,8 @@ export function initDatabase() {
   db.execSync(`
     CREATE TABLE IF NOT EXISTS bill_contributions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      expense_id INTEGER NOT NULL REFERENCES expenses(id),
-      income_entry_id INTEGER NOT NULL REFERENCES income_entries(id),
+      expense_id INTEGER NOT NULL,
+      income_entry_id INTEGER NOT NULL,
       amount_funded REAL NOT NULL,
       status TEXT NOT NULL,
       shift_date TEXT NOT NULL,
@@ -239,6 +239,11 @@ export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDat
     ...allocationResult.funded,
     ...allocationResult.partial,
     ...allocationResult.unfunded,
+    ...(allocationResult.alreadyCovered || []).map(e => ({
+      ...e,
+      amountFunded: 0,
+      status: 'already_covered',
+    })),
   ];
 
   for (const bill of allBills) {
