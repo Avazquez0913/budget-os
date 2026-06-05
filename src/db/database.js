@@ -3,7 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import { EXPENSES, TOTAL_FIXED } from '../constants/expenses';
 
 // Upgraded to database file v10 for a fresh, error-free sandbox boot!
-const db = SQLite.openDatabaseSync('budgetos18.db');
+const db = SQLite.openDatabaseSync('budgetos19.db');
 
 export function initDatabase() {
   // 1. Settings Table
@@ -246,9 +246,16 @@ export function saveIncomeAndAllocation(incomeAmount, incomeType, note, shiftDat
     })),
   ];
 
+  console.log('SAVING BILL CONTRIBUTIONS:', allBills.map(b => ({
+    id: b.id,
+    name: b.name,
+    amountFunded: b.amountFunded || 0,
+    status: b.status
+  })));
+
   for (const bill of allBills) {
     db.runSync(
-      `INSERT INTO bill_contributions 
+      `INSERT INTO bill_contributions
         (expense_id, income_entry_id, amount_funded, status, shift_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [bill.id, entryId, bill.amountFunded || 0, bill.status, shiftDate, now]

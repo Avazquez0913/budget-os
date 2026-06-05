@@ -91,7 +91,7 @@ for (const expense of sorted) {
   // Condition 2: We can't fund it completely, but we can at least meet or exceed the daily target
   else if (pool > 0) {
     // Maximize your payout! Take as much as the pool can handle up to the full remaining need
-    const optimalContribution = Math.max(targetContribution, Math.min(pool, expense.stillNeed));
+    const optimalContribution = Math.min(pool, expense.stillNeed);
     
     if (optimalContribution === expense.stillNeed) {
       funded.push({
