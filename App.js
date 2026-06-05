@@ -18,7 +18,7 @@ import {
   getUserDebts, addUserDebt, updateUserDebt, deleteUserDebt,
   deleteShiftAllocation, editShiftAllocation,
   editBillContribution, editBucketContribution, editDebtPayment,
-  editBucketBalance, editDebtBalance
+  editBucketBalance, editDebtBalance, editBillFundedAmount
 } from './src/db/database';
 import {
   allocate, getMonthlySummary, getInsights, getDebtSummary
@@ -105,6 +105,8 @@ export default function App() {
   const [editBalanceAmount, setEditBalanceAmount] = useState('');
   const [editDebtModal, setEditDebtModal]         = useState(null);
   const [editDebtAmount, setEditDebtAmount]       = useState('');
+  const [editBillBalanceModal, setEditBillBalanceModal] = useState(null);
+  const [editBillBalanceAmount, setEditBillBalanceAmount] = useState('');
 
   const refresh = useCallback(() => {
     const h = getHistory();
@@ -611,6 +613,7 @@ return (
                       onLongPress={() => {
                         Alert.alert(b.name, `$${b.funded_total.toFixed(2)} / $${b.target.toFixed(2)}`, [
                           { text: 'Contribute', onPress: () => { setBillContribModal(b); setBillContribHistory(getRecentBillContributions(b.id)); } },
+                          { text: 'Edit Balance', onPress: () => { setEditBillBalanceModal(b); setEditBillBalanceAmount(b.funded_total.toFixed(2)); } },
                           { text: 'Edit', onPress: () => {
                             setEditingBillId(b.id);
                             setNewBillName(b.name);
@@ -1745,6 +1748,47 @@ return (
               <TouchableOpacity
                 style={[s.btn, { backgroundColor: colors.elevated }]}
                 onPress={() => { setEditDebtModal(null); setEditDebtAmount(''); }}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── EDIT BILL BALANCE MODAL ── */}
+      <Modal visible={!!editBillBalanceModal} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>Edit Balance</Text>
+              <Text style={[s.muted, { marginBottom: 16 }]}>{editBillBalanceModal?.name}</Text>
+              <Text style={s.fieldLabel}>Funded amount this month ($)</Text>
+              <TextInput
+                style={s.input}
+                keyboardType="decimal-pad"
+                value={editBillBalanceAmount}
+                onChangeText={setEditBillBalanceAmount}
+                returnKeyType="done"
+                autoFocus
+              />
+              <Text style={[s.muted, { marginBottom: 16 }]}>Sets total funded this month</Text>
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  const amt = parseFloat(editBillBalanceAmount);
+                  if (isNaN(amt) || amt < 0) return;
+                  editBillFundedAmount(editBillBalanceModal.id, amt);
+                  refresh();
+                  setEditBillBalanceModal(null);
+                  setEditBillBalanceAmount('');
+                }}
+              >
+                <Text style={s.btnText}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => { setEditBillBalanceModal(null); setEditBillBalanceAmount(''); }}
               >
                 <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
               </TouchableOpacity>

@@ -511,6 +511,38 @@ export function editDebtPayment(paymentId, newAmount) {
   db.runSync('UPDATE debt_payments SET amount = ? WHERE id = ?', [newAmount, paymentId]);
 }
 
+export function editBillFundedAmount(expenseId, newAmount) {
+  const now = new Date();
+  const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  // sum of shift-allocated (non-manual) contributions this month
+  const autoRow = db.getFirstSync(
+    `SELECT COALESCE(SUM(amount_funded), 0) as total FROM bill_contributions
+     WHERE expense_id = ? AND income_entry_id != -1 AND shift_date LIKE ? || '%'`,
+    [expenseId, prefix]
+  );
+  const autoFunded = autoRow ? autoRow.total : 0;
+
+  // remove all manual entries for this bill this month
+  db.runSync(
+    `DELETE FROM bill_contributions
+     WHERE expense_id = ? AND income_entry_id = -1 AND shift_date LIKE ? || '%'`,
+    [expenseId, prefix]
+  );
+
+  // insert one manual entry for the gap (if target > auto-funded)
+  const adjustment = parseFloat((newAmount - autoFunded).toFixed(2));
+  if (adjustment > 0) {
+    const ts = new Date().toISOString();
+    db.runSync(
+      `INSERT INTO bill_contributions
+        (expense_id, income_entry_id, amount_funded, status, shift_date, created_at)
+       VALUES (?, -1, ?, 'manual', ?, ?)`,
+      [expenseId, adjustment, `${prefix}-01`, ts]
+    );
+  }
+}
+
 export function editBucketBalance(bucketId, newBalance) {
   db.runSync(
     'UPDATE buckets SET current_balance = MAX(0, ?) WHERE id = ?',
