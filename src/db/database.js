@@ -506,3 +506,122 @@ export function updateUserDebt(id, name, balance, apr, type, promoExpiry, monthl
 export function deleteUserDebt(id) {
   db.runSync('UPDATE user_debts SET active = 0 WHERE id = ?', [id]);
 }
+
+export function editDebtPayment(paymentId, newAmount) {
+  db.runSync('UPDATE debt_payments SET amount = ? WHERE id = ?', [newAmount, paymentId]);
+}
+
+export function editBucketContribution(contributionId, bucketId, newAmount) {
+  const old = db.getFirstSync('SELECT amount FROM bucket_contributions WHERE id = ?', [contributionId]);
+  if (!old) return;
+  const diff = newAmount - old.amount;
+  db.runSync('UPDATE bucket_contributions SET amount = ? WHERE id = ?', [newAmount, contributionId]);
+  db.runSync(
+    'UPDATE buckets SET current_balance = MAX(0, current_balance + ?) WHERE id = ?',
+    [diff, bucketId]
+  );
+}
+
+export function editBillContribution(contributionId, newAmount) {
+  db.runSync(
+    'UPDATE bill_contributions SET amount_funded = ? WHERE id = ?',
+    [newAmount, contributionId]
+  );
+}
+
+export function editShiftAllocation(incomeEntryId, newAmount) {
+  // 1. Get current allocation
+  const alloc = db.getFirstSync(
+    'SELECT savings, emergency, personal, bills_pool FROM allocations WHERE income_entry_id = ?',
+    [incomeEntryId]
+  );
+  // 2. Get current income amount
+  const entry = db.getFirstSync('SELECT amount FROM income_entries WHERE id = ?', [incomeEntryId]);
+  // 3. Get settings
+  const s = db.getFirstSync('SELECT savings_pct, emergency_pct, personal_pct, bills_pct FROM settings WHERE id = 1');
+
+  if (!alloc || !entry || !s) return;
+
+  // 4. Calculate new splits
+  const newPersonal  = parseFloat((newAmount * s.personal_pct).toFixed(2));
+  const newSavings   = parseFloat((newAmount * s.savings_pct).toFixed(2));
+  const newEmergency = parseFloat((newAmount * s.emergency_pct).toFixed(2));
+  const newBillsPool = parseFloat((newAmount * s.bills_pct).toFixed(2));
+
+  // 5. Calculate differences
+  const savingsDiff   = newSavings   - alloc.savings;
+  const emergencyDiff = newEmergency - alloc.emergency;
+
+  // 6. Update savings bucket
+  const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses' LIMIT 1");
+  if (savingsBucket) {
+    db.runSync(
+      'UPDATE buckets SET current_balance = MAX(0, current_balance + ?) WHERE id = ?',
+      [savingsDiff, savingsBucket.id]
+    );
+  }
+
+  // 7. Update emergency bucket
+  const emergencyBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Emergency Fund' LIMIT 1");
+  if (emergencyBucket) {
+    db.runSync(
+      'UPDATE buckets SET current_balance = MAX(0, current_balance + ?) WHERE id = ?',
+      [emergencyDiff, emergencyBucket.id]
+    );
+  }
+
+  // 8. Scale bill contributions proportionally (manual entries with income_entry_id = -1 excluded by WHERE clause)
+  const ratio = newAmount / entry.amount;
+  db.runSync(
+    'UPDATE bill_contributions SET amount_funded = MAX(0, amount_funded * ?) WHERE income_entry_id = ?',
+    [ratio, incomeEntryId]
+  );
+
+  // 9. Update allocation record
+  db.runSync(
+    'UPDATE allocations SET personal = ?, savings = ?, emergency = ?, bills_pool = ? WHERE income_entry_id = ?',
+    [newPersonal, newSavings, newEmergency, newBillsPool, incomeEntryId]
+  );
+
+  // 10. Update income entry
+  db.runSync('UPDATE income_entries SET amount = ? WHERE id = ?', [newAmount, incomeEntryId]);
+}
+
+export function deleteShiftAllocation(incomeEntryId) {
+  // 1. Get allocation amounts to reverse
+  const alloc = db.getFirstSync(
+    'SELECT savings, emergency FROM allocations WHERE income_entry_id = ?',
+    [incomeEntryId]
+  );
+
+  // 2–4. Reverse bucket balances if allocation exists
+  if (alloc) {
+    if (alloc.savings > 0) {
+      const savingsBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Unexpected Expenses' LIMIT 1");
+      if (savingsBucket) {
+        db.runSync(
+          'UPDATE buckets SET current_balance = MAX(0, current_balance - ?) WHERE id = ?',
+          [alloc.savings, savingsBucket.id]
+        );
+      }
+    }
+    if (alloc.emergency > 0) {
+      const emergencyBucket = db.getFirstSync("SELECT id FROM buckets WHERE name = 'Emergency Fund' LIMIT 1");
+      if (emergencyBucket) {
+        db.runSync(
+          'UPDATE buckets SET current_balance = MAX(0, current_balance - ?) WHERE id = ?',
+          [alloc.emergency, emergencyBucket.id]
+        );
+      }
+    }
+  }
+
+  // 5. Delete bill contributions
+  db.runSync('DELETE FROM bill_contributions WHERE income_entry_id = ?', [incomeEntryId]);
+
+  // 6. Delete allocation record
+  db.runSync('DELETE FROM allocations WHERE income_entry_id = ?', [incomeEntryId]);
+
+  // 7. Delete income entry
+  db.runSync('DELETE FROM income_entries WHERE id = ?', [incomeEntryId]);
+}

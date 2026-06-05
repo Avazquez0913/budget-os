@@ -15,7 +15,9 @@ import {
   getRecentBucketContributions, deleteBucketContribution,
   getRecentDebtPayments, deleteDebtPayment,
   getUserBills, addUserBill, updateUserBill, deleteUserBill,
-  getUserDebts, addUserDebt, updateUserDebt, deleteUserDebt
+  getUserDebts, addUserDebt, updateUserDebt, deleteUserDebt,
+  deleteShiftAllocation, editShiftAllocation,
+  editBillContribution, editBucketContribution, editDebtPayment
 } from './src/db/database';
 import {
   allocate, getMonthlySummary, getInsights, getDebtSummary
@@ -90,6 +92,14 @@ export default function App() {
   const [newDebtType, setNewDebtType]         = useState('credit');
   const [newDebtPromoExpiry, setNewDebtPromoExpiry] = useState('');
   const [newDebtMonthlyMin, setNewDebtMonthlyMin]   = useState('0');
+  const [editShiftModal, setEditShiftModal]   = useState(null);
+  const [editShiftAmount, setEditShiftAmount] = useState('');
+  const [editingBillContribId, setEditingBillContribId]   = useState(null);
+  const [editingBillContribAmt, setEditingBillContribAmt] = useState('');
+  const [editingBucketContribId, setEditingBucketContribId]   = useState(null);
+  const [editingBucketContribAmt, setEditingBucketContribAmt] = useState('');
+  const [editingDebtPaymentId, setEditingDebtPaymentId]   = useState(null);
+  const [editingDebtPaymentAmt, setEditingDebtPaymentAmt] = useState('');
 
   const refresh = useCallback(() => {
     const h = getHistory();
@@ -850,7 +860,32 @@ return (
 
               <Text style={[s.sectionLabel, { marginTop: 16 }]}>RECENT SHIFTS</Text>
               {history.slice(0, 10).map(h => (
-                <View key={h.id} style={s.historyCard}>
+                <TouchableOpacity
+                  key={h.id}
+                  style={s.historyCard}
+                  onLongPress={() => {
+                    Alert.alert(
+                      `$${h.amount.toFixed(2)} · ${formatDisplay(h.shift_date)}`,
+                      h.note || h.income_type,
+                      [
+                        { text: 'Edit Amount', onPress: () => { setEditShiftModal(h); setEditShiftAmount(String(h.amount)); } },
+                        { text: 'Delete Shift', style: 'destructive', onPress: () => {
+                          Alert.alert(
+                            'Delete this shift?',
+                            `$${h.amount.toFixed(2)} · ${formatDisplay(h.shift_date)}`,
+                            [
+                              { text: 'Delete', style: 'destructive', onPress: () => { deleteShiftAllocation(h.id); refresh(); } },
+                              { text: 'Cancel', style: 'cancel' },
+                            ]
+                          );
+                        }},
+                        { text: 'Cancel', style: 'cancel' },
+                      ]
+                    );
+                  }}
+                  delayLongPress={400}
+                  activeOpacity={0.9}
+                >
                   <View style={s.historyTop}>
                     <Text style={s.historyAmt}>${h.amount.toFixed(2)}</Text>
                     <Text style={s.muted}>{formatDisplay(h.shift_date)}</Text>
@@ -861,7 +896,8 @@ return (
                     <Text style={[s.billSub, { color: colors.savings }]}>${h.savings.toFixed(2)} saved</Text>
                     <Text style={[s.billSub, { color: colors.emergency }]}>${h.emergency.toFixed(2)} emergency</Text>
                   </View>
-                </View>
+                  <Text style={[s.billSub, { color: colors.textDisabled, marginTop: 4 }]}>hold to edit or delete</Text>
+                </TouchableOpacity>
               ))}
             </>
           )}
@@ -963,18 +999,48 @@ return (
                       <View style={{ marginTop: 8 }}>
                         <Text style={[s.fieldLabel, { marginBottom: 4 }]}>RECENT</Text>
                         {bucketHistory.map(c => (
-                          <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
-                            alignItems: 'center', paddingVertical: 6,
-                            borderTopWidth: 1, borderTopColor: colors.border }}>
-                            <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
-                            <Text style={s.billSub}>{c.created_at.slice(0, 10)}</Text>
-                            <TouchableOpacity onPress={() => {
-                              deleteBucketContribution(c.id, c.amount, b.id);
-                              setBuckets(getBuckets());
-                              setBucketHistory(getRecentBucketContributions(b.id));
-                            }}>
-                              <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
-                            </TouchableOpacity>
+                          <View key={c.id} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            {editingBucketContribId === c.id ? (
+                              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                                <TextInput
+                                  style={[s.input, { flex: 1, marginBottom: 0, padding: 8 }]}
+                                  keyboardType="decimal-pad"
+                                  value={editingBucketContribAmt}
+                                  onChangeText={setEditingBucketContribAmt}
+                                  returnKeyType="done"
+                                  autoFocus
+                                />
+                                <TouchableOpacity onPress={() => {
+                                  const amt = parseFloat(editingBucketContribAmt);
+                                  if (!isNaN(amt) && amt > 0) {
+                                    editBucketContribution(c.id, b.id, amt);
+                                    setBuckets(getBuckets());
+                                    setBucketHistory(getRecentBucketContributions(b.id));
+                                  }
+                                  setEditingBucketContribId(null);
+                                }}>
+                                  <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Save</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => setEditingBucketContribId(null)}>
+                                  <Text style={[s.btnText, { color: colors.textMuted, fontSize: 13 }]}>Cancel</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ) : (
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
+                                <Text style={s.billSub}>{c.created_at.slice(0, 10)}</Text>
+                                <TouchableOpacity onPress={() => { setEditingBucketContribId(c.id); setEditingBucketContribAmt(String(c.amount)); }}>
+                                  <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Edit</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => {
+                                  deleteBucketContribution(c.id, c.amount, b.id);
+                                  setBuckets(getBuckets());
+                                  setBucketHistory(getRecentBucketContributions(b.id));
+                                }}>
+                                  <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
                           </View>
                         ))}
                       </View>
@@ -1247,18 +1313,48 @@ return (
                 <>
                   <Text style={[s.fieldLabel, { marginTop: 12 }]}>RECENT</Text>
                   {debtContribHistory.map(c => (
-                    <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
-                      alignItems: 'center', paddingVertical: 8,
-                      borderTopWidth: 1, borderTopColor: colors.border }}>
-                      <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
-                      <Text style={s.billSub}>{c.date}</Text>
-                      <TouchableOpacity onPress={() => {
-                        deleteDebtPayment(c.id);
-                        setDebtContribHistory(getRecentDebtPayments(debtContribModal.name));
-                        setDebtPayments(getDebtPaymentTotals());
-                      }}>
-                        <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
-                      </TouchableOpacity>
+                    <View key={c.id} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
+                      {editingDebtPaymentId === c.id ? (
+                        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                          <TextInput
+                            style={[s.input, { flex: 1, marginBottom: 0, padding: 8 }]}
+                            keyboardType="decimal-pad"
+                            value={editingDebtPaymentAmt}
+                            onChangeText={setEditingDebtPaymentAmt}
+                            returnKeyType="done"
+                            autoFocus
+                          />
+                          <TouchableOpacity onPress={() => {
+                            const amt = parseFloat(editingDebtPaymentAmt);
+                            if (!isNaN(amt) && amt > 0) {
+                              editDebtPayment(c.id, amt);
+                              setDebtContribHistory(getRecentDebtPayments(debtContribModal.name));
+                              setDebtPayments(getDebtPaymentTotals());
+                            }
+                            setEditingDebtPaymentId(null);
+                          }}>
+                            <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Save</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setEditingDebtPaymentId(null)}>
+                            <Text style={[s.btnText, { color: colors.textMuted, fontSize: 13 }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
+                          <Text style={s.billSub}>{c.date}</Text>
+                          <TouchableOpacity onPress={() => { setEditingDebtPaymentId(c.id); setEditingDebtPaymentAmt(String(c.amount)); }}>
+                            <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Edit</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => {
+                            deleteDebtPayment(c.id);
+                            setDebtContribHistory(getRecentDebtPayments(debtContribModal.name));
+                            setDebtPayments(getDebtPaymentTotals());
+                          }}>
+                            <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ))}
                 </>
@@ -1339,18 +1435,48 @@ return (
                 <>
                   <Text style={[s.fieldLabel, { marginTop: 12 }]}>RECENT</Text>
                   {billContribHistory.map(c => (
-                    <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
-                      alignItems: 'center', paddingVertical: 8,
-                      borderTopWidth: 1, borderTopColor: colors.border }}>
-                      <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount_funded.toFixed(2)}</Text>
-                      <Text style={s.billSub}>{c.shift_date}</Text>
-                      <TouchableOpacity onPress={() => {
-                        deleteBillContribution(c.id);
-                        setBillContribHistory(getRecentBillContributions(billContribModal.id));
-                        refresh();
-                      }}>
-                        <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
-                      </TouchableOpacity>
+                    <View key={c.id} style={{ paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border }}>
+                      {editingBillContribId === c.id ? (
+                        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                          <TextInput
+                            style={[s.input, { flex: 1, marginBottom: 0, padding: 8 }]}
+                            keyboardType="decimal-pad"
+                            value={editingBillContribAmt}
+                            onChangeText={setEditingBillContribAmt}
+                            returnKeyType="done"
+                            autoFocus
+                          />
+                          <TouchableOpacity onPress={() => {
+                            const amt = parseFloat(editingBillContribAmt);
+                            if (!isNaN(amt) && amt > 0) {
+                              editBillContribution(c.id, amt);
+                              setBillContribHistory(getRecentBillContributions(billContribModal.id));
+                              refresh();
+                            }
+                            setEditingBillContribId(null);
+                          }}>
+                            <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Save</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setEditingBillContribId(null)}>
+                            <Text style={[s.btnText, { color: colors.textMuted, fontSize: 13 }]}>Cancel</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount_funded.toFixed(2)}</Text>
+                          <Text style={s.billSub}>{c.shift_date}</Text>
+                          <TouchableOpacity onPress={() => { setEditingBillContribId(c.id); setEditingBillContribAmt(String(c.amount_funded)); }}>
+                            <Text style={[s.btnText, { color: colors.teal, fontSize: 13 }]}>Edit</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => {
+                            deleteBillContribution(c.id);
+                            setBillContribHistory(getRecentBillContributions(billContribModal.id));
+                            refresh();
+                          }}>
+                            <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   ))}
                 </>
@@ -1529,6 +1655,48 @@ return (
               <TouchableOpacity
                 style={[s.btn, { backgroundColor: colors.elevated }]}
                 onPress={() => setAddDebtModal(false)}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── EDIT SHIFT MODAL ── */}
+      <Modal visible={!!editShiftModal} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>Edit Shift Amount</Text>
+              <Text style={[s.muted, { marginBottom: 16 }]}>
+                {editShiftModal ? formatDisplay(editShiftModal.shift_date) : ''}
+              </Text>
+              <Text style={s.fieldLabel}>New amount ($)</Text>
+              <TextInput
+                style={s.input}
+                keyboardType="decimal-pad"
+                value={editShiftAmount}
+                onChangeText={setEditShiftAmount}
+                returnKeyType="done"
+                autoFocus
+              />
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  const amt = parseFloat(editShiftAmount);
+                  if (isNaN(amt) || amt <= 0) return;
+                  editShiftAllocation(editShiftModal.id, amt);
+                  refresh();
+                  setEditShiftModal(null);
+                  setEditShiftAmount('');
+                }}
+              >
+                <Text style={s.btnText}>Save</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => { setEditShiftModal(null); setEditShiftAmount(''); }}
               >
                 <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
               </TouchableOpacity>
