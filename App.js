@@ -5,16 +5,24 @@ import {
   TouchableOpacity, Alert, StatusBar, Modal,
   KeyboardAvoidingView, Platform
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   initDatabase, saveIncomeAndAllocation, getHistory,
   getBuckets, addToBucket, createBucket,
-  getMonthlyBillProgress, updateBucket, deleteBucket
+  getMonthlyBillProgress, updateBucket, deleteBucket,
+  addManualBillContribution, addDebtPayment, getDebtPaymentTotals,
+  getRecentBillContributions, deleteBillContribution,
+  getRecentBucketContributions, deleteBucketContribution,
+  getRecentDebtPayments, deleteDebtPayment,
+  getUserBills, addUserBill, updateUserBill, deleteUserBill,
+  getUserDebts, addUserDebt, updateUserDebt, deleteUserDebt
 } from './src/db/database';
 import {
   allocate, getMonthlySummary, getInsights, getDebtSummary
 } from './src/algorithm/algorithm';
 import { EXPENSES, TOTAL_FIXED } from './src/constants/expenses';
 import { colors } from './src/constants/theme';
+
 
 initDatabase();
 
@@ -27,19 +35,6 @@ function formatDateKey(date) {
 function formatDisplay(dateStr) {
   const d = new Date(dateStr + 'T12:00:00');
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function buildDateOptions() {
-  const options = [];
-  const today = new Date();
-  for (let i = 0; i < 14; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const key = formatDateKey(d);
-    const label = i === 0 ? 'Today' : i === 1 ? 'Yesterday' : formatDisplay(key);
-    options.push({ key, label });
-  }
-  return options;
 }
 
 export default function App() {
@@ -57,8 +52,10 @@ export default function App() {
   const [insights, setInsights]     = useState(null);
   const [showResult, setShowResult] = useState(false);
   const [bucketModal, setBucketModal]       = useState(false);
-  const [newBucketName, setNewBucketName]   = useState('');
-  const [newBucketGoal, setNewBucketGoal]   = useState('');
+  const [newBucketName, setNewBucketName]         = useState('');
+  const [newBucketGoal, setNewBucketGoal]         = useState('');
+  const [newBucketTargetDate, setNewBucketTargetDate] = useState('');
+  const [editBucketTargetDate, setEditBucketTargetDate] = useState('');
   const [addingToBucket, setAddingToBucket] = useState(null);
   const [bucketAmount, setBucketAmount]     = useState('');
   const [bucketSplits, setBucketSplits]     = useState({});
@@ -66,11 +63,37 @@ export default function App() {
   const [editingBucket, setEditingBucket]   = useState(null);
   const [editBucketName, setEditBucketName] = useState('');
   const [editBucketGoal, setEditBucketGoal] = useState('');
-
-  const dateOptions = buildDateOptions();
+  const [billContribModal, setBillContribModal] = useState(null);
+  const [billContribAmount, setBillContribAmount] = useState('');
+  const [debtContribModal, setDebtContribModal] = useState(null);
+  const [debtContribAmount, setDebtContribAmount] = useState('');
+  const [debtPayments, setDebtPayments] = useState({});
+  const [billContribHistory, setBillContribHistory] = useState([]);
+  const [debtContribHistory, setDebtContribHistory] = useState([]);
+  const [bucketHistory, setBucketHistory] = useState([]);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [addBillModal, setAddBillModal]   = useState(false);
+  const [editingBillId, setEditingBillId] = useState(null);
+  const [newBillName, setNewBillName]     = useState('');
+  const [newBillAmount, setNewBillAmount] = useState('');
+  const [newBillDueDay, setNewBillDueDay] = useState('1');
+  const [newBillCategory, setNewBillCategory] = useState('Other');
+  const [newBillPriority, setNewBillPriority] = useState(3);
+  const [addDebtModal, setAddDebtModal]       = useState(false);
+  const [editingDebtId, setEditingDebtId]     = useState(null);
+  const [newDebtName, setNewDebtName]         = useState('');
+  const [newDebtBalance, setNewDebtBalance]   = useState('');
+  const [newDebtApr, setNewDebtApr]           = useState('0');
+  const [newDebtType, setNewDebtType]         = useState('credit');
+  const [newDebtPromoExpiry, setNewDebtPromoExpiry] = useState('');
+  const [newDebtMonthlyMin, setNewDebtMonthlyMin]   = useState('0');
 
   const refresh = useCallback(() => {
     const h = getHistory();
+    setDebtPayments(getDebtPaymentTotals());
     const bp = getMonthlyBillProgress();
     const totalFunded = bp.reduce((s, b) => s + b.funded_total, 0);
     const billsCoverage = Math.min((totalFunded / TOTAL_FIXED) * 100, 100);
@@ -97,7 +120,7 @@ export default function App() {
       return;
     }
     const currentProgress = getMonthlyBillProgress();
-    const allocation = allocate(amount, incomeType, null, currentProgress);
+    const allocation = allocate(amount, incomeType, null, currentProgress, getUserBills());
     saveIncomeAndAllocation(amount, incomeType, note, shiftDate, allocation);
     setResult(allocation);
     setRemainingDiscretionary(allocation.discretionary);
@@ -110,7 +133,7 @@ export default function App() {
     if (isNaN(amount) || amount <= 0) return;
     addToBucket(bucketId, amount, '');
     setBuckets(getBuckets());
-    setAddingToBucket(null);
+    setBucketHistory(getRecentBucketContributions(bucketId));
     setBucketAmount('');
   }
 
@@ -119,11 +142,13 @@ export default function App() {
     const goal = parseFloat(newBucketGoal) || null;
     const palette = ['#00d4a8','#7b61ff','#ff9f43','#ff4d6a','#4dabf7'];
     const color = palette[buckets.length % palette.length];
-    createBucket(newBucketName.trim(), goal, null, color);
+    const td = newBucketTargetDate.trim() || null;
+    createBucket(newBucketName.trim(), goal, td, color);
     setBuckets(getBuckets());
     setBucketModal(false);
     setNewBucketName('');
     setNewBucketGoal('');
+    setNewBucketTargetDate('');
   }
 
   function handleLongPressBucket(b) {
@@ -137,6 +162,7 @@ export default function App() {
             setEditingBucket(b);
             setEditBucketName(b.name);
             setEditBucketGoal(b.goal_amount ? String(b.goal_amount) : '');
+            setEditBucketTargetDate(b.target_date || '');
           }
         },
         {
@@ -388,6 +414,78 @@ export default function App() {
             </View>
           )}
 
+          {monthly && (() => {
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+            const monthShifts = history.filter(h => {
+              const d = new Date(h.shift_date + 'T12:00:00');
+              return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+            });
+            const avgShift = monthShifts.length > 0
+              ? monthShifts.reduce((s, h) => s + h.amount, 0) / monthShifts.length
+              : null;
+
+            const today = new Date();
+            const unpaidBills = billProgress
+              .filter(b => b.pct_funded < 100)
+              .map(b => {
+                const thisMonth = new Date(today.getFullYear(), today.getMonth(), b.due_day);
+                const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, b.due_day);
+                const target = thisMonth >= today ? thisMonth : nextMonth;
+                const daysLeft = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+                return { ...b, daysLeft };
+              })
+              .sort((a, b) => a.daysLeft - b.daysLeft);
+            const nextBill = unpaidBills[0] || null;
+
+            const totalSavings = buckets.reduce((s, b) => s + b.current_balance, 0);
+
+            return (
+              <View style={s.monthCard}>
+                <Text style={s.monthLabel}>QUICK STATS</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <Text style={s.muted}>Avg shift this month</Text>
+                  <Text style={[s.statVal, { color: colors.textPrimary }]}>
+                    {avgShift !== null ? `$${avgShift.toFixed(2)}` : '--'}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <Text style={s.muted}>Next bill due</Text>
+                  <Text style={[s.statVal, { color: colors.textPrimary }]}>
+                    {nextBill ? `${nextBill.name} · $${nextBill.target.toFixed(2)} · ${nextBill.daysLeft}d` : '--'}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={s.muted}>Total savings</Text>
+                  <Text style={[s.statVal, { color: colors.teal }]}>${totalSavings.toFixed(2)}</Text>
+                </View>
+              </View>
+            );
+          })()}
+
+          {insights && (
+            <>
+              <Text style={s.sectionLabel}>AVERAGE BY DAY OF WEEK</Text>
+              {insights.dowAvgs.map(d => (
+                <View key={d.name} style={s.dowRow}>
+                  <Text style={[s.dowName, d.name === insights.bestDay.name && { color: colors.teal }]}>
+                    {d.name}{d.name === insights.bestDay.name ? ' 🔥' : ''}
+                  </Text>
+                  <View style={s.dowBarTrack}>
+                    <View style={[s.dowBarFill, {
+                      width: insights.bestShift > 0
+                        ? `${(d.avg / insights.bestShift) * 100}%` : '0%',
+                      backgroundColor: d.name === insights.bestDay.name
+                        ? colors.teal : colors.elevated,
+                    }]} />
+                  </View>
+                  <Text style={s.dowAmt}>{d.shifts > 0 ? `$${d.avg}` : '—'}</Text>
+                </View>
+              ))}
+            </>
+          )}
+
           <Text style={s.sectionLabel}>INCOME TYPE</Text>
           <View style={s.segmented}>
             {['tips', 'paycheck'].map(type => (
@@ -404,9 +502,13 @@ export default function App() {
           </View>
 
           <Text style={s.sectionLabel}>SHIFT DATE</Text>
-          <TouchableOpacity style={s.datePicker} onPress={() => setShowDatePicker(true)}>
+          <TouchableOpacity style={s.datePicker} onPress={() => {
+            const d = new Date(shiftDate + 'T12:00:00');
+            setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+            setShowDatePicker(true);
+          }}>
             <Text style={s.datePickerText}>
-              📅 {dateOptions.find(d => d.key === shiftDate)?.label || formatDisplay(shiftDate)}
+               {formatDisplay(shiftDate)}
             </Text>
             <Text style={s.muted}>tap to change</Text>
           </TouchableOpacity>
@@ -436,7 +538,20 @@ export default function App() {
       {/* ── BUDGET TAB ── */}
       {tab === 'Budget' && (
         <ScrollView contentContainerStyle={s.content}>
-          <Text style={s.appName}>Budget</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={s.appName}>Budget</Text>
+            <TouchableOpacity
+              style={[s.addBillBtn]}
+              onPress={() => {
+                setEditingBillId(null);
+                setNewBillName(''); setNewBillAmount(''); setNewBillDueDay('1');
+                setNewBillCategory('Other'); setNewBillPriority(3);
+                setAddBillModal(true);
+              }}
+            >
+              <Text style={s.addBillBtnText}>+ Add Bill</Text>
+            </TouchableOpacity>
+          </View>
 
           {monthly && (
             <View style={s.monthCard}>
@@ -470,8 +585,34 @@ export default function App() {
                   const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, b.due_day);
                   const target = thisMonth >= today ? thisMonth : nextMonth;
                   const daysLeft = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
-                  return (
-                    <View key={b.id} style={s.budgetBillCard}>
+return (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={s.budgetBillCard}
+                      onLongPress={() => {
+                        Alert.alert(b.name, `$${b.funded_total.toFixed(2)} / $${b.target.toFixed(2)}`, [
+                          { text: 'Contribute', onPress: () => { setBillContribModal(b); setBillContribHistory(getRecentBillContributions(b.id)); } },
+                          { text: 'Edit', onPress: () => {
+                            setEditingBillId(b.id);
+                            setNewBillName(b.name);
+                            setNewBillAmount(String(b.target));
+                            setNewBillDueDay(String(b.due_day));
+                            setNewBillCategory(b.category || 'Other');
+                            setNewBillPriority(b.priority || 3);
+                            setAddBillModal(true);
+                          }},
+                          { text: 'Delete', style: 'destructive', onPress: () => {
+                            Alert.alert('Delete Bill', `Remove "${b.name}"?`, [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Delete', style: 'destructive', onPress: () => { deleteUserBill(b.id); refresh(); } },
+                            ]);
+                          }},
+                          { text: 'Cancel', style: 'cancel' },
+                        ]);
+                      }}
+                      delayLongPress={400}
+                      activeOpacity={0.9}
+                    >
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
                         <Text style={[s.billName, isFullyFunded && { color: colors.teal }]}>
                           {isFullyFunded ? '✓ ' : ''}{b.name}
@@ -493,7 +634,12 @@ export default function App() {
                         <Text style={s.billSub}>{pct.toFixed(0)}% funded · due in {daysLeft}d</Text>
                         <Text style={s.billSub}>${(b.target - b.funded_total).toFixed(2)} left</Text>
                       </View>
-                    </View>
+                      {!isFullyFunded && (
+                        <Text style={[s.billSub, { color: colors.textDisabled, marginTop: 4 }]}>
+                          hold for options
+                        </Text>
+                      )}
+                    </TouchableOpacity>
                   );
                 })}
               </View>
@@ -505,7 +651,20 @@ export default function App() {
       {/* ── INSIGHTS TAB ── */}
       {tab === 'Insights' && (
         <ScrollView contentContainerStyle={s.content}>
-          <Text style={s.appName}>Insights</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={s.appName}>Insights</Text>
+            <TouchableOpacity
+              style={s.addBillBtn}
+              onPress={() => {
+                setEditingDebtId(null);
+                setNewDebtName(''); setNewDebtBalance(''); setNewDebtApr('0');
+                setNewDebtType('credit'); setNewDebtPromoExpiry(''); setNewDebtMonthlyMin('0');
+                setAddDebtModal(true);
+              }}
+            >
+              <Text style={s.addBillBtnText}>+ Add Debt</Text>
+            </TouchableOpacity>
+          </View>
 
           {!insights && <Text style={s.empty}>Log a few shifts to see insights</Text>}
 
@@ -537,27 +696,9 @@ export default function App() {
                 <Text style={s.muted}>{insights.totalShifts} shifts logged</Text>
               </View>
 
-              <Text style={s.sectionLabel}>AVERAGE BY DAY OF WEEK</Text>
-              {insights.dowAvgs.map(d => (
-                <View key={d.name} style={s.dowRow}>
-                  <Text style={[s.dowName, d.name === insights.bestDay.name && { color: colors.teal }]}>
-                    {d.name}{d.name === insights.bestDay.name ? ' 🔥' : ''}
-                  </Text>
-                  <View style={s.dowBarTrack}>
-                    <View style={[s.dowBarFill, {
-                      width: insights.bestShift > 0
-                        ? `${(d.avg / insights.bestShift) * 100}%` : '0%',
-                      backgroundColor: d.name === insights.bestDay.name
-                        ? colors.teal : colors.elevated,
-                    }]} />
-                  </View>
-                  <Text style={s.dowAmt}>{d.shifts > 0 ? `$${d.avg}` : '—'}</Text>
-                </View>
-              ))}
-
               {/* ── DEBT TRACKER ── */}
               {(() => {
-                const debt = getDebtSummary();
+                const debt = getDebtSummary(debtPayments);
                 return (
                   <View style={{ marginTop: 8 }}>
                     <Text style={s.sectionLabel}>DEBT TRACKER</Text>
@@ -566,14 +707,43 @@ export default function App() {
                     </Text>
 
                     {debt.debts.map((d, i) => (
-                      <View key={i} style={[s.monthCard, {
-                        borderLeftWidth: 3,
-                        borderLeftColor:
-                          d.urgency === 'high' ? colors.unfunded :
-                          d.urgency === 'medium' ? colors.emergency :
-                          colors.textMuted,
-                        marginBottom: 10,
-                      }]}>
+                      <TouchableOpacity
+                        key={i}
+                        style={[s.monthCard, {
+                          borderLeftWidth: 3,
+                          borderLeftColor:
+                            d.urgency === 'high' ? colors.unfunded :
+                            d.urgency === 'medium' ? colors.emergency :
+                            colors.textMuted,
+                          marginBottom: 10,
+                        }]}
+                        onLongPress={() => {
+                          Alert.alert(d.name, `Balance: $${d.balance.toLocaleString()}`, [
+                            { text: 'Log Payment', onPress: () => { setDebtContribModal(d); setDebtContribHistory(getRecentDebtPayments(d.name)); } },
+                            { text: 'Edit', onPress: () => {
+                              setEditingDebtId(d.id || null);
+                              setNewDebtName(d.name);
+                              setNewDebtBalance(String(d.balance));
+                              setNewDebtApr(String(d.apr));
+                              setNewDebtType(d.type);
+                              setNewDebtPromoExpiry(d.promo_expiry || '');
+                              setNewDebtMonthlyMin(String(d.monthly_min || d.monthlyMin || 0));
+                              setAddDebtModal(true);
+                            }},
+                            { text: 'Delete', style: 'destructive', onPress: () => {
+                              Alert.alert('Delete Debt', `Remove "${d.name}"?`, [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Delete', style: 'destructive', onPress: () => {
+                                  if (d.id) { deleteUserDebt(d.id); refresh(); }
+                                }},
+                              ]);
+                            }},
+                            { text: 'Cancel', style: 'cancel' },
+                          ]);
+                        }}
+                        delayLongPress={400}
+                        activeOpacity={0.9}
+                      >
                         <View style={{ flexDirection: 'row',
                           justifyContent: 'space-between', marginBottom: 4 }}>
                           <Text style={s.billName}>{d.name}</Text>
@@ -632,13 +802,37 @@ export default function App() {
                             <Text style={s.billSub}>
                               {d.apr}% APR · ${d.balance.toLocaleString()} remaining · ~{d.monthsLeft} months left
                             </Text>
+                            {(() => {
+                              const carBill = billProgress.find(b => b.name === 'Car Payment');
+                              const monthlyFunded = carBill ? carBill.funded_total : 0;
+                              const monthlyPct = Math.min((monthlyFunded / 676.83) * 100, 100);
+                              return (
+                                <>
+                                  <Text style={[s.billSub, { marginTop: 8, fontWeight: '600',
+                                    color: colors.textPrimary }]}>This month's payment</Text>
+                                  <View style={s.barTrack}>
+                                    <View style={[s.barFill, {
+                                      width: `${monthlyPct}%`,
+                                      backgroundColor: monthlyPct >= 100 ? colors.teal : colors.savings,
+                                    }]} />
+                                  </View>
+                                  <Text style={s.billSub}>
+                                    ${monthlyFunded.toFixed(2)} / $676.83 · {monthlyPct.toFixed(0)}%
+                                    {monthlyPct >= 100 ? ' ✓ paid' : ''}
+                                  </Text>
+                                </>
+                              );
+                            })()}
                           </>
                         )}
 
                         <Text style={[s.billSub, { marginTop: 4, fontStyle: 'italic' }]}>
                           {d.note}
                         </Text>
-                      </View>
+                        <Text style={[s.billSub, { color: colors.textDisabled, marginTop: 6 }]}>
+                          hold to record a payment
+                        </Text>
+                      </TouchableOpacity>
                     ))}
 
                     {debt.studentDeferDaysLeft < 180 && (
@@ -698,6 +892,18 @@ export default function App() {
           {buckets.map(b => {
             const pct = b.goal_amount
               ? Math.min((b.current_balance / b.goal_amount) * 100, 100) : null;
+            const monthlyNeeded = (() => {
+              if (!b.goal_amount || !b.target_date) return null;
+              const remaining = Math.max(b.goal_amount - b.current_balance, 0);
+              if (remaining === 0) return null;
+              const target = new Date(b.target_date);
+              const now = new Date();
+              const months = Math.max(
+                (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth()),
+                1
+              );
+              return (remaining / months).toFixed(2);
+            })();
             return (
               <TouchableOpacity
                 key={b.id}
@@ -716,42 +922,72 @@ export default function App() {
                       <View style={[s.barFill, { width: `${pct}%`, backgroundColor: b.color }]} />
                     </View>
                     <Text style={s.billSub}>{pct.toFixed(1)}% of ${b.goal_amount.toFixed(2)} goal</Text>
+                    {monthlyNeeded && (
+                      <Text style={[s.billSub, { color: colors.teal }]}>
+                        ${monthlyNeeded}/mo needed · target {new Date(b.target_date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}
+                      </Text>
+                    )}
                   </>
                 )}
                 <Text style={[s.billSub, { color: colors.textDisabled, marginTop: 4 }]}>
                   hold to edit or delete
                 </Text>
                 {addingToBucket === b.id ? (
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-                    <TextInput
-                      style={[s.input, { flex: 1, marginBottom: 0, padding: 10 }]}
-                      placeholder="Amount"
-                      placeholderTextColor={colors.textDisabled}
-                      keyboardType="decimal-pad"
-                      returnKeyType="done"
-                      value={bucketAmount}
-                      onChangeText={setBucketAmount}
-                      autoFocus
-                    />
-                    <TouchableOpacity
-                      style={[s.btn, { paddingHorizontal: 16, paddingVertical: 10, marginBottom: 0 }]}
-                      onPress={() => handleAddToBucket(b.id)}
-                    >
-                      <Text style={s.btnText}>Add</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[s.btn, { paddingHorizontal: 12, paddingVertical: 10,
-                        marginBottom: 0, backgroundColor: colors.elevated }]}
-                      onPress={() => setAddingToBucket(null)}
-                    >
-                      <Text style={[s.btnText, { color: colors.textPrimary }]}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                      <TextInput
+                        style={[s.input, { flex: 1, marginBottom: 0, padding: 10 }]}
+                        placeholder="Amount"
+                        placeholderTextColor={colors.textDisabled}
+                        keyboardType="decimal-pad"
+                        returnKeyType="done"
+                        value={bucketAmount}
+                        onChangeText={setBucketAmount}
+                        autoFocus
+                      />
+                      <TouchableOpacity
+                        style={[s.btn, { paddingHorizontal: 16, paddingVertical: 10, marginBottom: 0 }]}
+                        onPress={() => handleAddToBucket(b.id)}
+                      >
+                        <Text style={s.btnText}>Add</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[s.btn, { paddingHorizontal: 12, paddingVertical: 10,
+                          marginBottom: 0, backgroundColor: colors.elevated }]}
+                        onPress={() => { setAddingToBucket(null); setBucketHistory([]); }}
+                      >
+                        <Text style={[s.btnText, { color: colors.textPrimary }]}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {bucketHistory.length > 0 && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={[s.fieldLabel, { marginBottom: 4 }]}>RECENT</Text>
+                        {bucketHistory.map(c => (
+                          <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
+                            alignItems: 'center', paddingVertical: 6,
+                            borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
+                            <Text style={s.billSub}>{c.created_at.slice(0, 10)}</Text>
+                            <TouchableOpacity onPress={() => {
+                              deleteBucketContribution(c.id, c.amount, b.id);
+                              setBuckets(getBuckets());
+                              setBucketHistory(getRecentBucketContributions(b.id));
+                            }}>
+                              <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </>
                 ) : (
                   <TouchableOpacity
                     style={[s.btn, { marginTop: 10, marginBottom: 0,
                       paddingVertical: 8, backgroundColor: colors.elevated }]}
-                    onPress={() => setAddingToBucket(b.id)}
+                    onPress={() => {
+                      setAddingToBucket(b.id);
+                      setBucketHistory(getRecentBucketContributions(b.id));
+                    }}
                   >
                     <Text style={[s.btnText, { color: colors.textPrimary }]}>+ Add Money</Text>
                   </TouchableOpacity>
@@ -764,14 +1000,21 @@ export default function App() {
 
       {/* ── TAB BAR ── */}
       <View style={s.tabBar}>
-        {TABS.map(t => (
-          <TouchableOpacity key={t} style={s.tabItem} onPress={() => setTab(t)}>
-            <Text style={s.tabIcon}>
-              {t === 'Home' ? '⚡' : t === 'Budget' ? '📊' : t === 'Insights' ? '🔥' : '🪣'}
-            </Text>
-            <Text style={[s.tabLabel, tab === t && s.tabLabelActive]}>{t}</Text>
-          </TouchableOpacity>
-        ))}
+        {TABS.map(t => {
+          const active = tab === t;
+          const iconProps = { size: 24, color: active ? colors.teal : colors.textMuted };
+          const icon =
+            t === 'Home'     ? <Ionicons name={active ? 'home' : 'home-outline'} {...iconProps} /> :
+            t === 'Budget'   ? <Ionicons name={active ? 'wallet' : 'wallet-outline'} {...iconProps} /> :
+            t === 'Insights' ? <Ionicons name={active ? 'bar-chart' : 'bar-chart-outline'} {...iconProps} /> :
+                               <Ionicons name={active ? 'save' : 'save-outline'} {...iconProps} />;
+          return (
+            <TouchableOpacity key={t} style={s.tabItem} onPress={() => setTab(t)}>
+              {icon}
+              <Text style={[s.tabLabel, active && s.tabLabelActive]}>{t}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── DATE PICKER MODAL ── */}
@@ -779,20 +1022,88 @@ export default function App() {
         <View style={s.modalOverlay}>
           <View style={s.modalCard}>
             <Text style={s.modalTitle}>When was this shift?</Text>
-            {dateOptions.map(opt => (
-              <TouchableOpacity
-                key={opt.key}
-                style={[s.dateOption, shiftDate === opt.key && s.dateOptionActive]}
-                onPress={() => { setShiftDate(opt.key); setShowDatePicker(false); }}
-              >
-                <Text style={[s.dateOptionText, shiftDate === opt.key && { color: colors.teal }]}>
-                  {opt.label}
-                </Text>
-                <Text style={s.muted}>{opt.key}</Text>
-              </TouchableOpacity>
-            ))}
+            {(() => {
+              const today = new Date();
+              const todayKey = formatDateKey(today);
+              const shiftKeys = new Set(history.map(h => h.shift_date));
+              const year = calendarMonth.getFullYear();
+              const month = calendarMonth.getMonth();
+              const monthLabel = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+              const minMonth = new Date(today.getFullYear(), today.getMonth() - 6, 1);
+              const maxMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+              const canGoBack = calendarMonth.getTime() > minMonth.getTime();
+              const canGoForward = calendarMonth.getTime() < maxMonth.getTime();
+              const firstDayOfWeek = new Date(year, month, 1).getDay();
+              const daysInMonth = new Date(year, month + 1, 0).getDate();
+              const cells = [];
+              for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+              while (cells.length % 7 !== 0) cells.push(null);
+              const rows = [];
+              for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+              return (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center',
+                    justifyContent: 'space-between', marginBottom: 16 }}>
+                    <TouchableOpacity
+                      style={{ padding: 8 }}
+                      onPress={() => canGoBack && setCalendarMonth(new Date(year, month - 1, 1))}
+                    >
+                      <Text style={[s.calNavArrow, !canGoBack && { color: colors.textDisabled }]}>‹</Text>
+                    </TouchableOpacity>
+                    <Text style={s.calMonthLabel}>{monthLabel}</Text>
+                    <TouchableOpacity
+                      style={{ padding: 8 }}
+                      onPress={() => canGoForward && setCalendarMonth(new Date(year, month + 1, 1))}
+                    >
+                      <Text style={[s.calNavArrow, !canGoForward && { color: colors.textDisabled }]}>›</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={s.calWeekRow}>
+                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(lbl => (
+                      <Text key={lbl} style={s.calDayHeader}>{lbl}</Text>
+                    ))}
+                  </View>
+                  {rows.map((row, ri) => (
+                    <View key={ri} style={s.calWeekRow}>
+                      {row.map((day, ci) => {
+                        if (!day) return <View key={ci} style={s.calDayCell} />;
+                        const dateKey = `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                        const isToday    = dateKey === todayKey;
+                        const isSelected = dateKey === shiftDate;
+                        const isFuture   = dateKey > todayKey;
+                        const hasShift   = shiftKeys.has(dateKey);
+                        return (
+                          <TouchableOpacity
+                            key={ci}
+                            style={s.calDayCell}
+                            onPress={() => { if (isFuture) return; setShiftDate(dateKey); setShowDatePicker(false); }}
+                            activeOpacity={isFuture ? 1 : 0.7}
+                          >
+                            <View style={[
+                              s.calDayCircle,
+                              isToday && !isSelected && { borderWidth: 1, borderColor: colors.teal },
+                              isSelected && { backgroundColor: colors.teal },
+                            ]}>
+                              <Text style={[
+                                s.calDayText,
+                                isFuture && { color: colors.textDisabled },
+                                isSelected && { color: colors.bg },
+                              ]}>
+                                {day}
+                              </Text>
+                            </View>
+                            {hasShift && !isFuture && <View style={s.calDot} />}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ))}
+                </>
+              );
+            })()}
             <TouchableOpacity
-              style={[s.btn, { backgroundColor: colors.elevated, marginTop: 8 }]}
+              style={[s.btn, { backgroundColor: colors.elevated, marginTop: 16 }]}
               onPress={() => setShowDatePicker(false)}
             >
               <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
@@ -830,6 +1141,16 @@ export default function App() {
                 keyboardType="decimal-pad"
                 value={newBucketGoal}
                 onChangeText={setNewBucketGoal}
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>Target date (optional, YYYY-MM-DD)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 2026-12-01"
+                placeholderTextColor={colors.textDisabled}
+                value={newBucketTargetDate}
+                onChangeText={setNewBucketTargetDate}
                 returnKeyType="done"
                 onSubmitEditing={handleCreateBucket}
               />
@@ -875,6 +1196,170 @@ export default function App() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ── DEBT CONTRIBUTION MODAL ── */}
+      <Modal visible={!!debtContribModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>{debtContribModal?.name}</Text>
+              <Text style={[s.muted, { marginBottom: 16 }]}>
+                Balance: ${debtContribModal?.balance.toLocaleString()}
+              </Text>
+
+              <Text style={s.fieldLabel}>Payment amount</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 100.00"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={debtContribAmount}
+                onChangeText={setDebtContribAmount}
+                returnKeyType="done"
+                autoFocus
+              />
+
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  const amt = parseFloat(debtContribAmount);
+                  if (isNaN(amt) || amt <= 0) return;
+                  addDebtPayment(debtContribModal.name, amt, formatDateKey(new Date()));
+                  setDebtPayments(getDebtPaymentTotals());
+                  setDebtContribModal(null);
+                  setDebtContribAmount('');
+                  setDebtContribHistory([]);
+                }}
+              >
+                <Text style={s.btnText}>Record Payment</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => { setDebtContribModal(null); setDebtContribAmount(''); setDebtContribHistory([]); }}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              {debtContribHistory.length > 0 && (
+                <>
+                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>RECENT</Text>
+                  {debtContribHistory.map(c => (
+                    <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
+                      alignItems: 'center', paddingVertical: 8,
+                      borderTopWidth: 1, borderTopColor: colors.border }}>
+                      <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount.toFixed(2)}</Text>
+                      <Text style={s.billSub}>{c.date}</Text>
+                      <TouchableOpacity onPress={() => {
+                        deleteDebtPayment(c.id);
+                        setDebtContribHistory(getRecentDebtPayments(debtContribModal.name));
+                        setDebtPayments(getDebtPaymentTotals());
+                      }}>
+                        <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── BILL CONTRIBUTION MODAL ── */}
+      <Modal visible={!!billContribModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>{billContribModal?.name}</Text>
+              <Text style={[s.muted, { marginBottom: 16 }]}>
+                ${billContribModal?.funded_total.toFixed(2)} of ${billContribModal?.target.toFixed(2)} funded
+                {' · '}${(billContribModal
+                  ? Math.max(billContribModal.target - billContribModal.funded_total, 0)
+                  : 0).toFixed(2)} remaining
+              </Text>
+
+              <Text style={s.fieldLabel}>Amount to add</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 50.00"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={billContribAmount}
+                onChangeText={setBillContribAmount}
+                returnKeyType="done"
+                autoFocus
+              />
+
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  const amt = parseFloat(billContribAmount);
+                  if (isNaN(amt) || amt <= 0) return;
+                  addManualBillContribution(billContribModal.id, amt, formatDateKey(new Date()));
+                  refresh();
+                  setBillContribModal(null);
+                  setBillContribAmount('');
+                  setBillContribHistory([]);
+                }}
+              >
+                <Text style={s.btnText}>Add Amount</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.teal }]}
+                onPress={() => {
+                  const remaining = parseFloat(
+                    Math.max(billContribModal.target - billContribModal.funded_total, 0).toFixed(2)
+                  );
+                  if (remaining <= 0) return;
+                  addManualBillContribution(billContribModal.id, remaining, formatDateKey(new Date()));
+                  refresh();
+                  setBillContribModal(null);
+                  setBillContribAmount('');
+                  setBillContribHistory([]);
+                }}
+              >
+                <Text style={[s.btnText, { color: colors.teal }]}>Mark as Fully Paid</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => { setBillContribModal(null); setBillContribAmount(''); setBillContribHistory([]); }}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+
+              {billContribHistory.length > 0 && (
+                <>
+                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>RECENT</Text>
+                  {billContribHistory.map(c => (
+                    <View key={c.id} style={{ flexDirection: 'row', justifyContent: 'space-between',
+                      alignItems: 'center', paddingVertical: 8,
+                      borderTopWidth: 1, borderTopColor: colors.border }}>
+                      <Text style={[s.billName, { color: colors.textPrimary }]}>${c.amount_funded.toFixed(2)}</Text>
+                      <Text style={s.billSub}>{c.shift_date}</Text>
+                      <TouchableOpacity onPress={() => {
+                        deleteBillContribution(c.id);
+                        setBillContribHistory(getRecentBillContributions(billContribModal.id));
+                        refresh();
+                      }}>
+                        <Text style={[s.btnText, { color: colors.unfunded, fontSize: 13 }]}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       {/* ── EDIT BUCKET MODAL ── */}
       <Modal visible={!!editingBucket} transparent animationType="slide">
         <KeyboardAvoidingView
@@ -902,6 +1387,16 @@ export default function App() {
                 onChangeText={setEditBucketGoal}
                 placeholderTextColor={colors.textDisabled}
                 keyboardType="decimal-pad"
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>Target date (optional, YYYY-MM-DD)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 2026-12-01"
+                placeholderTextColor={colors.textDisabled}
+                value={editBucketTargetDate}
+                onChangeText={setEditBucketTargetDate}
                 returnKeyType="done"
               />
 
@@ -910,7 +1405,8 @@ export default function App() {
                 onPress={() => {
                   if (!editBucketName.trim()) return;
                   const goal = parseFloat(editBucketGoal) || null;
-                  updateBucket(editingBucket.id, editBucketName.trim(), goal);
+                  const td = editBucketTargetDate.trim() || null;
+                  updateBucket(editingBucket.id, editBucketName.trim(), goal, td);
                   setBuckets(getBuckets());
                   setEditingBucket(null);
                 }}
@@ -921,6 +1417,217 @@ export default function App() {
               <TouchableOpacity
                 style={[s.btn, { backgroundColor: colors.elevated }]}
                 onPress={() => setEditingBucket(null)}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── ADD / EDIT DEBT MODAL ── */}
+      <Modal visible={addDebtModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>{editingDebtId ? 'Edit Debt' : 'New Debt'}</Text>
+
+              <Text style={s.fieldLabel}>Name</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. CITI Card"
+                placeholderTextColor={colors.textDisabled}
+                value={newDebtName}
+                onChangeText={setNewDebtName}
+                returnKeyType="next"
+                autoFocus
+              />
+
+              <Text style={s.fieldLabel}>Current balance ($)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 2500"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={newDebtBalance}
+                onChangeText={setNewDebtBalance}
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>APR (%)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 19.99  (0 for promo)"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={newDebtApr}
+                onChangeText={setNewDebtApr}
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>Monthly minimum ($)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 25"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={newDebtMonthlyMin}
+                onChangeText={setNewDebtMonthlyMin}
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>Type</Text>
+              <View style={{ flexDirection: 'row', marginBottom: 12, gap: 8 }}>
+                {[['Credit','credit'],['Promo 0%','promo'],['Student','student'],['Installment','installment']].map(([label, val]) => (
+                  <TouchableOpacity
+                    key={val}
+                    style={[s.priorityChip, newDebtType === val && { backgroundColor: colors.teal, borderColor: colors.teal }]}
+                    onPress={() => setNewDebtType(val)}
+                  >
+                    <Text style={[s.priorityChipText, newDebtType === val && { color: colors.bg }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {newDebtType === 'promo' && (
+                <>
+                  <Text style={s.fieldLabel}>Promo expiry (YYYY-MM-DD)</Text>
+                  <TextInput
+                    style={s.input}
+                    placeholder="e.g. 2027-02-01"
+                    placeholderTextColor={colors.textDisabled}
+                    value={newDebtPromoExpiry}
+                    onChangeText={setNewDebtPromoExpiry}
+                    returnKeyType="done"
+                  />
+                </>
+              )}
+
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  if (!newDebtName.trim() || !newDebtBalance.trim()) return;
+                  const bal = parseFloat(newDebtBalance);
+                  const apr = parseFloat(newDebtApr) || 0;
+                  const min = parseFloat(newDebtMonthlyMin) || 0;
+                  if (isNaN(bal) || bal < 0) return;
+                  if (editingDebtId) {
+                    updateUserDebt(editingDebtId, newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min);
+                  } else {
+                    addUserDebt(newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min);
+                  }
+                  refresh();
+                  setAddDebtModal(false);
+                }}
+              >
+                <Text style={s.btnText}>{editingDebtId ? 'Save Changes' : 'Add Debt'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => setAddDebtModal(false)}
+              >
+                <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── ADD / EDIT BILL MODAL ── */}
+      <Modal visible={addBillModal} transparent animationType="slide">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <View style={s.modalOverlay}>
+            <View style={s.modalCard}>
+              <Text style={s.modalTitle}>{editingBillId ? 'Edit Bill' : 'New Bill'}</Text>
+
+              <Text style={s.fieldLabel}>Name</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. Rent"
+                placeholderTextColor={colors.textDisabled}
+                value={newBillName}
+                onChangeText={setNewBillName}
+                returnKeyType="next"
+                autoFocus
+              />
+
+              <Text style={s.fieldLabel}>Monthly amount ($)</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 1200"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="decimal-pad"
+                value={newBillAmount}
+                onChangeText={setNewBillAmount}
+                returnKeyType="next"
+              />
+
+              <Text style={s.fieldLabel}>Due day of month</Text>
+              <TextInput
+                style={s.input}
+                placeholder="e.g. 1"
+                placeholderTextColor={colors.textDisabled}
+                keyboardType="number-pad"
+                value={newBillDueDay}
+                onChangeText={setNewBillDueDay}
+                returnKeyType="done"
+              />
+
+              <Text style={s.fieldLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                {['Housing','Transport','Utilities','Food','Health','Entertainment','Other'].map(cat => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[s.categoryChip, newBillCategory === cat && s.categoryChipActive]}
+                    onPress={() => setNewBillCategory(cat)}
+                  >
+                    <Text style={[s.categoryChipText, newBillCategory === cat && { color: colors.bg }]}>{cat}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={s.fieldLabel}>Priority</Text>
+              <View style={{ flexDirection: 'row', marginBottom: 16, gap: 8 }}>
+                {[['Critical',1,colors.unfunded],['High',2,colors.emergency],['Normal',3,colors.savings],['Low',4,colors.textMuted]].map(([label, val, col]) => (
+                  <TouchableOpacity
+                    key={val}
+                    style={[s.priorityChip, newBillPriority === val && { backgroundColor: col, borderColor: col }]}
+                    onPress={() => setNewBillPriority(val)}
+                  >
+                    <Text style={[s.priorityChipText, newBillPriority === val && { color: colors.bg }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <TouchableOpacity
+                style={s.btn}
+                onPress={() => {
+                  if (!newBillName.trim() || !newBillAmount.trim()) return;
+                  const amt = parseFloat(newBillAmount);
+                  const day = parseInt(newBillDueDay, 10);
+                  if (isNaN(amt) || amt <= 0 || isNaN(day) || day < 1 || day > 31) return;
+                  if (editingBillId) {
+                    updateUserBill(editingBillId, newBillName.trim(), amt, day, newBillCategory, newBillPriority);
+                  } else {
+                    addUserBill(newBillName.trim(), amt, day, newBillCategory, newBillPriority);
+                  }
+                  refresh();
+                  setAddBillModal(false);
+                }}
+              >
+                <Text style={s.btnText}>{editingBillId ? 'Save Changes' : 'Add Bill'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[s.btn, { backgroundColor: colors.elevated }]}
+                onPress={() => setAddBillModal(false)}
               >
                 <Text style={[s.btnText, { color: colors.textPrimary }]}>Cancel</Text>
               </TouchableOpacity>
@@ -1003,9 +1710,8 @@ const s = StyleSheet.create({
                    borderTopWidth: 1, borderTopColor: colors.border,
                    paddingBottom: 28, paddingTop: 10 },
   tabItem:       { flex: 1, alignItems: 'center' },
-  tabIcon:       { fontSize: 18, marginBottom: 2 },
-  tabLabel:      { fontSize: 10, color: colors.textDisabled, fontWeight: '600' },
-  tabLabelActive:{ color: colors.teal },
+  tabLabel:       { fontSize: 10, color: colors.textDisabled, fontWeight: '600', marginTop: 3 },
+  tabLabelActive: { color: colors.teal },
   modalOverlay:  { flex: 1, backgroundColor: '#000000aa', justifyContent: 'flex-end' },
   modalCard:     { backgroundColor: colors.elevated, borderTopLeftRadius: 20,
                    borderTopRightRadius: 20, padding: 24, paddingBottom: 48 },
@@ -1019,4 +1725,24 @@ const s = StyleSheet.create({
   dateOptionText:{ fontSize: 14, color: colors.textPrimary, fontWeight: '500' },
   stickyFooter:  { padding: 16, paddingBottom: 36, backgroundColor: colors.bg,
                    borderTopWidth: 1, borderTopColor: colors.border },
+  calNavArrow:   { fontSize: 28, fontWeight: '300', color: colors.textPrimary, lineHeight: 34 },
+  calMonthLabel: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+  calWeekRow:    { flexDirection: 'row', marginBottom: 2 },
+  calDayHeader:  { flex: 1, textAlign: 'center', fontSize: 10, fontWeight: '600',
+                   color: colors.textMuted, paddingBottom: 8 },
+  calDayCell:    { flex: 1, alignItems: 'center', paddingVertical: 3 },
+  calDayCircle:  { width: 34, height: 34, borderRadius: 17, alignItems: 'center',
+                   justifyContent: 'center' },
+  calDayText:    { fontSize: 14, color: colors.textPrimary, fontWeight: '500' },
+  calDot:        { width: 4, height: 4, borderRadius: 2, backgroundColor: colors.teal, marginTop: 2 },
+  addBillBtn:    { backgroundColor: colors.teal, paddingHorizontal: 14, paddingVertical: 8,
+                   borderRadius: 20 },
+  addBillBtnText: { color: colors.bg, fontWeight: '700', fontSize: 13 },
+  categoryChip:  { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16, marginRight: 8,
+                   borderWidth: 1, borderColor: colors.border },
+  categoryChipActive: { backgroundColor: colors.teal, borderColor: colors.teal },
+  categoryChipText:   { color: colors.textPrimary, fontSize: 13 },
+  priorityChip:  { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10,
+                   borderWidth: 1, borderColor: colors.border },
+  priorityChipText: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
 });

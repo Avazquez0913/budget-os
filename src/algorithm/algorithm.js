@@ -1,5 +1,6 @@
 // src/algorithm/algorithm.js
-import { EXPENSES, TOTAL_FIXED } from '../constants/expenses';
+import { TOTAL_FIXED } from '../constants/expenses';
+import { getUserDebts } from '../db/database';
 
 function daysUntilDue(dueDay) {
   const today = new Date();
@@ -17,7 +18,7 @@ function getDueLabel(daysLeft) {
   return 'LATER';
 }
 
-export function allocate(incomeAmount, incomeType = 'tips', settings = null, monthlyProgress = []) {
+export function allocate(incomeAmount, incomeType = 'tips', settings = null, monthlyProgress = [], bills = []) {
   const pct = settings || { personal: 0.20, savings: 0.15, emergency: 0.05, bills: 0.60 };
 
   const personal  = parseFloat((incomeAmount * pct.personal).toFixed(2));
@@ -32,7 +33,7 @@ export function allocate(incomeAmount, incomeType = 'tips', settings = null, mon
   });
 
   // enrich each expense with daily accrual data
-  const enriched = EXPENSES.map(e => {
+  const enriched = bills.map(e => {
     const alreadyFunded = alreadyFundedMap[e.id] || 0;
     const stillNeed     = parseFloat(Math.max(e.amount - alreadyFunded, 0).toFixed(2));
     const daysLeft      = daysUntilDue(e.dueDay);
@@ -282,10 +283,9 @@ export function getInsights(historyEntries) {
 }
 
 // ── DEBT TRACKER ──────────────────────────────────────
-export function getDebtSummary() {
+export function getDebtSummary(extraPayments = {}) {
   const now = new Date();
 
-  // ── helper: months between two dates ────────────────
   function monthsUntil(targetDate) {
     const diff = targetDate - now;
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24 * 30)));
@@ -295,111 +295,78 @@ export function getDebtSummary() {
     return Math.max(0, Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24)));
   }
 
-  // ── truck dynamic balance ────────────────────────────
-  // Started: May 2026, $41,951.58, 4.99% APR, $676.83/mo
-  const truckStart     = new Date('2026-05-01');
-  const truckAPR       = 0.0499;
-  const truckMonthRate = truckAPR / 12;
-  const truckPayment   = 676.83;
-  let   truckBalance   = 41951.58;
-  const monthsElapsed  = Math.floor((now - truckStart) / (1000 * 60 * 60 * 24 * 30));
-  for (let i = 0; i < monthsElapsed; i++) {
-    const interest = truckBalance * truckMonthRate;
-    truckBalance = Math.max(0, truckBalance - (truckPayment - interest));
-  }
-  const truckMonthsLeft = Math.ceil(truckBalance / truckPayment);
-
-  // ── 0% promos ────────────────────────────────────────
-  const citiExpiry     = new Date('2027-02-01');
-  const discoverExpiry = new Date('2027-04-04');
-
-  // ── student loans ────────────────────────────────────
   const studentDeferEnd = new Date('2026-11-01');
   const daysToRepayment = daysUntil(studentDeferEnd);
 
-  return {
-    debts: [
-      {
-        name:        'CITI Card',
-        balance:     2520.00,
-        apr:         0,
-        type:        'promo',
-        promoExpiry: citiExpiry,
-        monthsLeft:  monthsUntil(citiExpiry),
-        daysLeft:    daysUntil(citiExpiry),
-        monthlyMin:  280.00,
-        freedWhenDone: 280.00,
+  // installment amortization helper
+  const truckStart    = new Date('2026-05-01');
+  const monthsElapsed = Math.floor((now - truckStart) / (1000 * 60 * 60 * 24 * 30));
+
+  const userDebts = getUserDebts();
+
+  const debts = userDebts.map(d => {
+    let balance = Math.max(0, d.balance - (extraPayments[d.name] || 0));
+
+    if (d.type === 'installment') {
+      const mr = (d.apr / 100) / 12;
+      let b = d.balance;
+      for (let i = 0; i < monthsElapsed; i++) {
+        b = Math.max(0, b - (d.monthly_min - b * mr));
+      }
+      balance = Math.max(0, b - (extraPayments[d.name] || 0));
+    }
+
+    const base = {
+      name:      d.name,
+      balance:   parseFloat(balance.toFixed(2)),
+      apr:       d.apr,
+      type:      d.type,
+      monthlyMin: d.monthly_min,
+      freedWhenDone: d.monthly_min,
+    };
+
+    if (d.type === 'promo' && d.promo_expiry) {
+      const expiry = new Date(d.promo_expiry);
+      return {
+        ...base,
+        promoExpiry: expiry,
+        monthsLeft:  monthsUntil(expiry),
+        daysLeft:    daysUntil(expiry),
         urgency:     'high',
-        note:        '0% promo expires Feb 2027 — pay off before then',
-      },
-      {
-        name:        'Discover IT',
-        balance:     5250.00,
-        apr:         0,
-        type:        'promo',
-        promoExpiry: discoverExpiry,
-        monthsLeft:  monthsUntil(discoverExpiry),
-        daysLeft:    daysUntil(discoverExpiry),
-        monthlyMin:  0,
-        freedWhenDone: 0,
-        urgency:     'high',
-        note:        '0% promo expires Apr 2027 — build lump sum now',
-      },
-      {
-        name:        'Student Loan 1-02',
-        balance:     5500.00,
-        apr:         6.53,
-        type:        'student',
-        deferred:    true,
-        deferEndDate: studentDeferEnd,
+        note:        `0% promo expires ${expiry.toLocaleDateString('en-US',{month:'short',year:'numeric'})} — pay off before then`,
+      };
+    }
+
+    if (d.type === 'student') {
+      return {
+        ...base,
+        deferred:       true,
+        deferEndDate:   studentDeferEnd,
         daysToRepayment,
-        monthlyMin:  0,
-        urgency:     'medium',
-        note:        `Highest rate — attack first after Nov 2026`,
-      },
-      {
-        name:        'Student Loan 1-03',
-        balance:     5500.00,
-        apr:         6.39,
-        type:        'student',
-        deferred:    true,
-        deferEndDate: studentDeferEnd,
-        daysToRepayment,
-        monthlyMin:  0,
-        urgency:     'medium',
-        note:        'Attack second after 1-02 is cleared',
-      },
-      {
-        name:        'Student Loan 1-01',
-        balance:     4500.00,
-        apr:         5.50,
-        type:        'student',
-        deferred:    true,
-        deferEndDate: studentDeferEnd,
-        daysToRepayment,
-        monthlyMin:  0,
-        urgency:     'low',
-        note:        'Lowest rate — attack last',
-      },
-      {
-        name:         'Truck Loan',
-        balance:      parseFloat(truckBalance.toFixed(2)),
-        apr:          4.99,
-        type:         'installment',
-        deferred:     false,
-        monthsLeft:   truckMonthsLeft,
-        monthlyMin:   676.83,
-        freedWhenDone: 676.83,
-        urgency:      'low',
-        note:         'Lowest rate — pay minimum only',
-      },
-    ],
-    totalDebt: parseFloat(
-      (2520 + 5250 + 5500 + 5500 + 4500 + truckBalance).toFixed(2)
-    ),
-    nextUrgent: 'CITI Card',
-    studentDeferDaysLeft: daysToRepayment,
-  };
+        urgency:        'medium',
+        note:           `${d.apr}% APR — deferred until Nov 2026`,
+      };
+    }
+
+    if (d.type === 'installment') {
+      const monthsLeft = d.monthly_min > 0 ? Math.ceil(balance / d.monthly_min) : 0;
+      return {
+        ...base,
+        monthsLeft,
+        deferred: false,
+        urgency: 'low',
+        note: 'Installment loan — pay minimum only',
+      };
+    }
+
+    return { ...base, urgency: 'medium', note: '' };
+  });
+
+  const totalDebt = parseFloat(debts.reduce((s, d) => s + d.balance, 0).toFixed(2));
+  const promoDebts = debts.filter(d => d.type === 'promo');
+  const nextUrgent = promoDebts.length > 0 ? promoDebts[0].name : (debts[0]?.name || '');
+
+  return { debts, totalDebt, nextUrgent, studentDeferDaysLeft: daysToRepayment };
 }
 
 // keep old function for backward compatibility

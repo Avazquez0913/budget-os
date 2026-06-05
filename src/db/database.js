@@ -81,7 +81,7 @@ export function initDatabase() {
     );
   `);
 
-  // 7. Bill Contributions Table 
+  // 7. Bill Contributions Table
   db.execSync(`
     CREATE TABLE IF NOT EXISTS bill_contributions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,6 +90,46 @@ export function initDatabase() {
       amount_funded REAL NOT NULL,
       status TEXT NOT NULL,
       shift_date TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // 8. Debt Payments Table
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS debt_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      debt_name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      date TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // 9. User Bills Table (PUBLIC-01 — dynamic bills)
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS user_bills (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      due_day INTEGER NOT NULL DEFAULT 1,
+      category TEXT NOT NULL DEFAULT 'Other',
+      priority INTEGER NOT NULL DEFAULT 3,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  // 10. User Debts Table (PUBLIC-02 — dynamic debts)
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS user_debts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      balance REAL NOT NULL,
+      apr REAL NOT NULL DEFAULT 0,
+      type TEXT NOT NULL DEFAULT 'credit',
+      promo_expiry TEXT,
+      monthly_min REAL NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
   `);
@@ -109,6 +149,36 @@ export function initDatabase() {
       db.runSync(
         'INSERT INTO expenses (id, name, category, amount, priority, due_day) VALUES (?, ?, ?, ?, ?, ?)',
         [expense.id, expense.name, expense.category, expense.amount, expense.priority, expense.dueDay]
+      );
+    }
+  }
+
+  const userBillCount = db.getFirstSync('SELECT COUNT(*) as count FROM user_bills');
+  if (userBillCount.count === 0) {
+    const now = new Date().toISOString();
+    for (const expense of EXPENSES) {
+      db.runSync(
+        'INSERT INTO user_bills (id, name, amount, due_day, category, priority, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+        [expense.id, expense.name, expense.amount, expense.dueDay, expense.category, expense.priority, now]
+      );
+    }
+  }
+
+  const userDebtCount = db.getFirstSync('SELECT COUNT(*) as count FROM user_debts');
+  if (userDebtCount.count === 0) {
+    const now = new Date().toISOString();
+    const seedDebts = [
+      { name: 'CITI Card',         balance: 2520.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-02-01', monthly_min: 280 },
+      { name: 'Discover IT',       balance: 5250.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-04-04', monthly_min: 0 },
+      { name: 'Student Loan 1-02', balance: 5500.00,  apr: 6.53, type: 'student',     promo_expiry: null,         monthly_min: 0 },
+      { name: 'Student Loan 1-03', balance: 5500.00,  apr: 6.39, type: 'student',     promo_expiry: null,         monthly_min: 0 },
+      { name: 'Student Loan 1-01', balance: 4500.00,  apr: 5.50, type: 'student',     promo_expiry: null,         monthly_min: 0 },
+      { name: 'Truck Loan',        balance: 41951.58, apr: 4.99, type: 'installment', promo_expiry: null,         monthly_min: 676.83 },
+    ];
+    for (const d of seedDebts) {
+      db.runSync(
+        'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+        [d.name, d.balance, d.apr, d.type, d.promo_expiry, d.monthly_min, now]
       );
     }
   }
@@ -268,20 +338,21 @@ export function getMonthlyBillProgress() {
 
   return db.getAllSync(`
     SELECT
-      e.id,
-      e.name,
-      e.amount as target,
-      e.priority,
-      e.due_day,
-      e.category,
+      ub.id,
+      ub.name,
+      ub.amount as target,
+      ub.priority,
+      ub.due_day,
+      ub.category,
       COALESCE(SUM(bc.amount_funded), 0) as funded_total,
-      COALESCE(SUM(bc.amount_funded) / e.amount * 100, 0) as pct_funded
-    FROM expenses e
-    LEFT JOIN bill_contributions bc 
-      ON bc.expense_id = e.id 
+      COALESCE(SUM(bc.amount_funded) / ub.amount * 100, 0) as pct_funded
+    FROM user_bills ub
+    LEFT JOIN bill_contributions bc
+      ON bc.expense_id = ub.id
       AND bc.shift_date LIKE ? || '%'
-    GROUP BY e.id
-    ORDER BY e.priority ASC, e.due_day ASC
+    WHERE ub.active = 1
+    GROUP BY ub.id
+    ORDER BY ub.priority ASC, ub.due_day ASC
   `, [prefix]);
 }
 
@@ -306,14 +377,132 @@ export function getHistory() {
   `);
 }
 
-export function updateBucket(id, name, goalAmount) {
+export function updateBucket(id, name, goalAmount, targetDate) {
   db.runSync(
-    'UPDATE buckets SET name = ?, goal_amount = ? WHERE id = ?',
-    [name, goalAmount, id]
+    'UPDATE buckets SET name = ?, goal_amount = ?, target_date = ? WHERE id = ?',
+    [name, goalAmount, targetDate || null, id]
   );
 }
 
 export function deleteBucket(id) {
   db.runSync('DELETE FROM bucket_contributions WHERE bucket_id = ?', [id]);
   db.runSync('DELETE FROM buckets WHERE id = ?', [id]);
+}
+
+export function addManualBillContribution(expenseId, amount, shiftDate) {
+  const now = new Date().toISOString();
+  db.runSync(
+    `INSERT INTO bill_contributions
+      (expense_id, income_entry_id, amount_funded, status, shift_date, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [expenseId, -1, amount, 'manual', shiftDate, now]
+  );
+}
+
+export function addDebtPayment(debtName, amount, date) {
+  const now = new Date().toISOString();
+  db.runSync(
+    'INSERT INTO debt_payments (debt_name, amount, date, created_at) VALUES (?, ?, ?, ?)',
+    [debtName, amount, date, now]
+  );
+}
+
+export function getDebtPaymentTotals() {
+  const rows = db.getAllSync(
+    'SELECT debt_name, COALESCE(SUM(amount), 0) as total FROM debt_payments GROUP BY debt_name'
+  );
+  const map = {};
+  rows.forEach(r => { map[r.debt_name] = r.total; });
+  return map;
+}
+
+export function getRecentBillContributions(expenseId) {
+  return db.getAllSync(
+    `SELECT id, amount_funded, shift_date FROM bill_contributions
+     WHERE expense_id = ? AND status = 'manual'
+     ORDER BY created_at DESC LIMIT 5`,
+    [expenseId]
+  );
+}
+
+export function deleteBillContribution(id) {
+  db.runSync('DELETE FROM bill_contributions WHERE id = ?', [id]);
+}
+
+export function getRecentBucketContributions(bucketId) {
+  return db.getAllSync(
+    `SELECT id, amount, created_at FROM bucket_contributions
+     WHERE bucket_id = ?
+     ORDER BY created_at DESC LIMIT 5`,
+    [bucketId]
+  );
+}
+
+export function deleteBucketContribution(id, amount, bucketId) {
+  db.runSync('DELETE FROM bucket_contributions WHERE id = ?', [id]);
+  db.runSync(
+    'UPDATE buckets SET current_balance = MAX(0, current_balance - ?) WHERE id = ?',
+    [amount, bucketId]
+  );
+}
+
+export function getRecentDebtPayments(debtName) {
+  return db.getAllSync(
+    `SELECT id, amount, date FROM debt_payments
+     WHERE debt_name = ?
+     ORDER BY created_at DESC LIMIT 5`,
+    [debtName]
+  );
+}
+
+export function deleteDebtPayment(id) {
+  db.runSync('DELETE FROM debt_payments WHERE id = ?', [id]);
+}
+
+export function getUserBills() {
+  return db.getAllSync(
+    'SELECT id, name, amount, due_day, category, priority FROM user_bills WHERE active = 1 ORDER BY priority ASC, due_day ASC'
+  ).map(b => ({ ...b, dueDay: b.due_day }));
+}
+
+export function addUserBill(name, amount, dueDay, category, priority) {
+  const now = new Date().toISOString();
+  db.runSync(
+    'INSERT INTO user_bills (name, amount, due_day, category, priority, active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
+    [name, amount, dueDay, category, priority, now]
+  );
+}
+
+export function updateUserBill(id, name, amount, dueDay, category, priority) {
+  db.runSync(
+    'UPDATE user_bills SET name = ?, amount = ?, due_day = ?, category = ?, priority = ? WHERE id = ?',
+    [name, amount, dueDay, category, priority, id]
+  );
+}
+
+export function deleteUserBill(id) {
+  db.runSync('UPDATE user_bills SET active = 0 WHERE id = ?', [id]);
+}
+
+export function getUserDebts() {
+  return db.getAllSync('SELECT * FROM user_debts WHERE active = 1 ORDER BY id ASC');
+}
+
+export function addUserDebt(name, balance, apr, type, promoExpiry, monthlyMin) {
+  const now = new Date().toISOString();
+  db.runSync(
+    'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+    [name, balance, apr, type, promoExpiry || null, monthlyMin, now]
+  );
+}
+
+export function updateUserDebt(id, name, balance, apr, type, promoExpiry, monthlyMin) {
+  db.runSync(
+    'UPDATE user_debts SET name = ?, balance = ?, apr = ?, type = ?, promo_expiry = ?, monthly_min = ? WHERE id = ?',
+    [name, balance, apr, type, promoExpiry || null, monthlyMin, id]
+  );
+}
+
+export function deleteUserDebt(id) {
+  db.runSync('UPDATE user_debts SET active = 0 WHERE id = ?', [id]);
 }
