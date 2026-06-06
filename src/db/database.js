@@ -200,6 +200,7 @@ export function initDatabase() {
   // Migrations
   db.runSync(`UPDATE user_debts SET monthly_min = 105 WHERE name = 'Discover IT' AND monthly_min = 0`);
   db.runSync(`UPDATE user_debts SET monthly_min = 30 WHERE name = 'CITI Card' AND monthly_min = 280`);
+  db.runSync(`UPDATE user_bills SET amount = 30 WHERE name = 'CITI Card' AND amount = 280`);
   try { db.runSync(`ALTER TABLE user_debts ADD COLUMN term_months INTEGER NOT NULL DEFAULT 0`); } catch (_) {}
   db.runSync(`UPDATE user_debts SET term_months = 72 WHERE name = 'Truck Loan' AND term_months = 0`);
 

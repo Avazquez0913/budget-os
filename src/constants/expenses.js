@@ -24,7 +24,7 @@ export const EXPENSES = [
 
     // ── NORMAL ────────────────────────────────────────────
     { id: 11, name: 'Gym',                 category: 'Health',        amount: 27.49,   priority: 3, dueDay: 18 },
-    { id: 12, name: 'CITI Card',           category: 'Debt',          amount: 280.00,  priority: 3, dueDay: 15 },
+    { id: 12, name: 'CITI Card',           category: 'Debt',          amount: 30.00,   priority: 3, dueDay: 15 },
     { id: 13, name: 'AMEX Annual Fee',     category: 'Shopping',      amount: 27.08,   priority: 3, dueDay: 27 },
     { id: 14, name: 'Chase SP Annual Fee', category: 'Shopping',      amount: 7.92,    priority: 3, dueDay: 1  },
     
