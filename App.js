@@ -29,7 +29,7 @@ import { colors } from './src/constants/theme';
 
 initDatabase();
 
-const TABS = ['Home', 'Budget', 'Insights', 'Buckets'];
+const TABS = ['Home', 'Budget', 'Insights', 'Savings'];
 
 function formatDateKey(date) {
   return date.toISOString().split('T')[0];
@@ -93,6 +93,7 @@ export default function App() {
   const [newDebtType, setNewDebtType]         = useState('credit');
   const [newDebtPromoExpiry, setNewDebtPromoExpiry] = useState('');
   const [newDebtMonthlyMin, setNewDebtMonthlyMin]   = useState('0');
+  const [newDebtTermMonths, setNewDebtTermMonths]   = useState(0);
   const [editShiftModal, setEditShiftModal]   = useState(null);
   const [editShiftAmount, setEditShiftAmount] = useState('');
   const [editingBillContribId, setEditingBillContribId]   = useState(null);
@@ -685,6 +686,7 @@ return (
                 setEditingDebtId(null);
                 setNewDebtName(''); setNewDebtBalance(''); setNewDebtApr('0');
                 setNewDebtType('credit'); setNewDebtPromoExpiry(''); setNewDebtMonthlyMin('0');
+                setNewDebtTermMonths(0);
                 setAddDebtModal(true);
               }}
             >
@@ -754,6 +756,7 @@ return (
                               setNewDebtType(d.type);
                               setNewDebtPromoExpiry(d.promo_expiry || '');
                               setNewDebtMonthlyMin(String(d.monthly_min || d.monthlyMin || 0));
+                              setNewDebtTermMonths(d.term_months || 0);
                               setAddDebtModal(true);
                             }},
                             { text: 'Edit Balance', onPress: () => { setEditDebtModal(d); setEditDebtAmount(String(d.balance)); } },
@@ -922,11 +925,11 @@ return (
       )}
 
       {/* ── BUCKETS TAB ── */}
-      {tab === 'Buckets' && (
+      {tab === 'Savings' && (
         <ScrollView contentContainerStyle={s.content}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between',
             alignItems: 'center', marginBottom: 4 }}>
-            <Text style={s.appName}>Buckets</Text>
+            <Text style={s.appName}>Savings</Text>
             <TouchableOpacity
               style={[s.btn, { paddingVertical: 8, paddingHorizontal: 16, marginBottom: 0 }]}
               onPress={() => setBucketModal(true)}
@@ -1649,6 +1652,23 @@ return (
                 </>
               )}
 
+              {newDebtType === 'installment' && (
+                <>
+                  <Text style={s.fieldLabel}>Loan term (months)</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12, gap: 8 }}>
+                    {[24, 36, 48, 60, 72, 84].map(t => (
+                      <TouchableOpacity
+                        key={t}
+                        style={[s.priorityChip, newDebtTermMonths === t && { backgroundColor: colors.teal, borderColor: colors.teal }]}
+                        onPress={() => setNewDebtTermMonths(t)}
+                      >
+                        <Text style={[s.priorityChipText, newDebtTermMonths === t && { color: colors.bg }]}>{t} mo</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
               <TouchableOpacity
                 style={s.btn}
                 onPress={() => {
@@ -1658,9 +1678,9 @@ return (
                   const min = parseFloat(newDebtMonthlyMin) || 0;
                   if (isNaN(bal) || bal < 0) return;
                   if (editingDebtId) {
-                    updateUserDebt(editingDebtId, newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min);
+                    updateUserDebt(editingDebtId, newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min, newDebtTermMonths);
                   } else {
-                    addUserDebt(newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min);
+                    addUserDebt(newDebtName.trim(), bal, apr, newDebtType, newDebtPromoExpiry || null, min, newDebtTermMonths);
                   }
                   refresh();
                   setAddDebtModal(false);

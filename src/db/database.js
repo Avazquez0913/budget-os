@@ -129,6 +129,7 @@ export function initDatabase() {
       type TEXT NOT NULL DEFAULT 'credit',
       promo_expiry TEXT,
       monthly_min REAL NOT NULL DEFAULT 0,
+      term_months INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL
     );
@@ -169,16 +170,16 @@ export function initDatabase() {
     const now = new Date().toISOString();
     const seedDebts = [
       { name: 'CITI Card',         balance: 2520.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-02-01', monthly_min: 280 },
-      { name: 'Discover IT',       balance: 5250.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-04-04', monthly_min: 0 },
+      { name: 'Discover IT',       balance: 5250.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-04-04', monthly_min: 105 },
       { name: 'Student Loan 1-02', balance: 5500.00,  apr: 6.53, type: 'student',     promo_expiry: null,         monthly_min: 0 },
       { name: 'Student Loan 1-03', balance: 5500.00,  apr: 6.39, type: 'student',     promo_expiry: null,         monthly_min: 0 },
       { name: 'Student Loan 1-01', balance: 4500.00,  apr: 5.50, type: 'student',     promo_expiry: null,         monthly_min: 0 },
-      { name: 'Truck Loan',        balance: 41951.58, apr: 4.99, type: 'installment', promo_expiry: null,         monthly_min: 676.83 },
+      { name: 'Truck Loan',        balance: 41951.58, apr: 4.99, type: 'installment', promo_expiry: null,         monthly_min: 676.83, term_months: 72 },
     ];
     for (const d of seedDebts) {
       db.runSync(
-        'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-        [d.name, d.balance, d.apr, d.type, d.promo_expiry, d.monthly_min, now]
+        'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, term_months, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)',
+        [d.name, d.balance, d.apr, d.type, d.promo_expiry, d.monthly_min, d.term_months || 0, now]
       );
     }
   }
@@ -195,6 +196,11 @@ export function initDatabase() {
       ['Unexpected Expenses', 500, 0, '#7b61ff', now]
     );
   }
+
+  // Migrations
+  db.runSync(`UPDATE user_debts SET monthly_min = 105 WHERE name = 'Discover IT' AND monthly_min = 0`);
+  try { db.runSync(`ALTER TABLE user_debts ADD COLUMN term_months INTEGER NOT NULL DEFAULT 0`); } catch (_) {}
+  db.runSync(`UPDATE user_debts SET term_months = 72 WHERE name = 'Truck Loan' AND term_months = 0`);
 
   const savingsBucketCheck = db.getFirstSync("SELECT COUNT(*) as count FROM buckets WHERE name = 'Savings'");
   if (savingsBucketCheck.count === 0) {
@@ -509,18 +515,18 @@ export function getUserDebts() {
   return db.getAllSync('SELECT * FROM user_debts WHERE active = 1 ORDER BY id ASC');
 }
 
-export function addUserDebt(name, balance, apr, type, promoExpiry, monthlyMin) {
+export function addUserDebt(name, balance, apr, type, promoExpiry, monthlyMin, termMonths = 0) {
   const now = new Date().toISOString();
   db.runSync(
-    'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-    [name, balance, apr, type, promoExpiry || null, monthlyMin, now]
+    'INSERT INTO user_debts (name, balance, apr, type, promo_expiry, monthly_min, term_months, active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)',
+    [name, balance, apr, type, promoExpiry || null, monthlyMin, termMonths, now]
   );
 }
 
-export function updateUserDebt(id, name, balance, apr, type, promoExpiry, monthlyMin) {
+export function updateUserDebt(id, name, balance, apr, type, promoExpiry, monthlyMin, termMonths = 0) {
   db.runSync(
-    'UPDATE user_debts SET name = ?, balance = ?, apr = ?, type = ?, promo_expiry = ?, monthly_min = ? WHERE id = ?',
-    [name, balance, apr, type, promoExpiry || null, monthlyMin, id]
+    'UPDATE user_debts SET name = ?, balance = ?, apr = ?, type = ?, promo_expiry = ?, monthly_min = ?, term_months = ? WHERE id = ?',
+    [name, balance, apr, type, promoExpiry || null, monthlyMin, termMonths, id]
   );
 }
 

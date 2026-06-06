@@ -349,7 +349,8 @@ export function getDebtSummary(extraPayments = {}) {
     }
 
     if (d.type === 'installment') {
-      const monthsLeft = d.monthly_min > 0 ? Math.ceil(balance / d.monthly_min) : 0;
+      const termLeft = d.term_months > 0 ? d.term_months - monthsElapsed : null;
+      const monthsLeft = termLeft !== null ? Math.max(0, termLeft) : (d.monthly_min > 0 ? Math.ceil(balance / d.monthly_min) : 0);
       return {
         ...base,
         monthsLeft,

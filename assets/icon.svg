@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background: dark rounded rectangle -->
+  <rect width="1024" height="1024" rx="180" ry="180" fill="#0a0a0f"/>
+
+  <!-- Y-fork: teal right arm -->
+  <line x1="512" y1="512" x2="680" y2="300" stroke="#00d4a8" stroke-width="72" stroke-linecap="round"/>
+
+  <!-- Y-fork: orange left arm -->
+  <line x1="512" y1="512" x2="344" y2="300" stroke="#f5a623" stroke-width="72" stroke-linecap="round"/>
+
+  <!-- Y-fork: white stem down -->
+  <line x1="512" y1="512" x2="512" y2="760" stroke="#ffffff" stroke-width="72" stroke-linecap="round"/>
+
+  <!-- White circle at top center (junction) -->
+  <circle cx="512" cy="512" r="52" fill="#ffffff"/>
+</svg>
