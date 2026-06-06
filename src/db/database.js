@@ -169,7 +169,7 @@ export function initDatabase() {
   if (userDebtCount.count === 0) {
     const now = new Date().toISOString();
     const seedDebts = [
-      { name: 'CITI Card',         balance: 2520.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-02-01', monthly_min: 280 },
+      { name: 'CITI Card',         balance: 2520.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-02-01', monthly_min: 30 },
       { name: 'Discover IT',       balance: 5250.00,  apr: 0,    type: 'promo',       promo_expiry: '2027-04-04', monthly_min: 105 },
       { name: 'Student Loan 1-02', balance: 5500.00,  apr: 6.53, type: 'student',     promo_expiry: null,         monthly_min: 0 },
       { name: 'Student Loan 1-03', balance: 5500.00,  apr: 6.39, type: 'student',     promo_expiry: null,         monthly_min: 0 },
@@ -199,6 +199,7 @@ export function initDatabase() {
 
   // Migrations
   db.runSync(`UPDATE user_debts SET monthly_min = 105 WHERE name = 'Discover IT' AND monthly_min = 0`);
+  db.runSync(`UPDATE user_debts SET monthly_min = 30 WHERE name = 'CITI Card' AND monthly_min = 280`);
   try { db.runSync(`ALTER TABLE user_debts ADD COLUMN term_months INTEGER NOT NULL DEFAULT 0`); } catch (_) {}
   db.runSync(`UPDATE user_debts SET term_months = 72 WHERE name = 'Truck Loan' AND term_months = 0`);
 
